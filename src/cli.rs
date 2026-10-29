@@ -4,7 +4,7 @@ use std::io::{self, Write};
 
 use crate::config::Config;
 use crate::db::Db;
-use crate::model::{Priority, RoutineFrequency, TaskStatus};
+use crate::model::{parse_weekday_loose, Priority, RoutineFrequency, TaskStatus};
 use crate::theme::due_date_display;
 
 #[derive(Parser, Debug, PartialEq, Eq)]
@@ -89,9 +89,12 @@ pub enum RoutineCommands {
     Add {
         /// タスク名
         title: String,
-        /// 頻度 (daily, mon, tue, wed, thu, fri, sat, sun)
+        /// 追加する曜日・頻度 (daily, mon, tue, wed, thu, fri, sat, sun)
         #[arg(short = 'f', long, default_value = "daily")]
         frequency: String,
+        /// 期日の曜日 (mon, tue, wed, thu, fri, sat, sun, none / 未指定時は追加曜日と同じ)
+        #[arg(short = 'd', long)]
+        due: Option<String>,
         /// 優先度 (low, medium, high)
         #[arg(short = 'p', long, default_value = "medium")]
         priority: String,
@@ -253,14 +256,14 @@ pub fn handle_cli(cli: Cli, db: &Db, config: &Config) -> Result<(), Box<dyn std:
                     return Ok(());
                 }
 
-                println!("{:<5} {:<18} {:<5} TITLE", "ID", "FREQUENCY", "PRIO");
-                println!("{}", "-".repeat(50));
+                println!("{:<5} {:<24} {:<5} TITLE", "ID", "SCHEDULE", "PRIO");
+                println!("{}", "-".repeat(55));
 
                 for r in routines {
                     println!(
-                        "{:<5} {:<18} {:<5} {}",
+                        "{:<5} {:<24} {:<5} {}",
                         r.id,
-                        r.frequency.display_label(),
+                        r.schedule_label(),
                         r.priority.indicator(),
                         r.title
                     );
@@ -269,18 +272,28 @@ pub fn handle_cli(cli: Cli, db: &Db, config: &Config) -> Result<(), Box<dyn std:
             RoutineCommands::Add {
                 title,
                 frequency,
+                due,
                 priority,
                 desc,
             } => {
                 let freq = RoutineFrequency::from_str_loose(&frequency);
+                let due_weekday = match freq {
+                    RoutineFrequency::Daily => None,
+                    RoutineFrequency::Weekly(spawn_w) => match due {
+                        Some(ref s) => parse_weekday_loose(s),
+                        None => Some(spawn_w),
+                    },
+                };
                 let prio = Priority::from_str_loose(&priority);
-                let id = db.add_routine(&title, &desc, prio, freq)?;
-                println!(
-                    "定期タスク #{} を作成しました [{}]: {}",
-                    id,
-                    freq.display_label(),
-                    title
-                );
+                let id = db.add_routine(&title, &desc, prio, freq, due_weekday)?;
+                if let Some(r) = db.get_routine_by_id(id)? {
+                    println!(
+                        "定期タスク #{} を作成しました [{}]: {}",
+                        id,
+                        r.schedule_label(),
+                        title
+                    );
+                }
             }
             RoutineCommands::Rm { ids, force } => {
                 for id in ids {
@@ -423,6 +436,8 @@ mod tests {
             "Gym workout",
             "-f",
             "mon",
+            "-d",
+            "fri",
             "-p",
             "high",
             "-m",
@@ -435,6 +450,7 @@ mod tests {
                 subcommand: RoutineCommands::Add {
                     title: "Gym workout".to_string(),
                     frequency: "mon".to_string(),
+                    due: Some("fri".to_string()),
                     priority: "high".to_string(),
                     desc: "Leg day".to_string(),
                 }

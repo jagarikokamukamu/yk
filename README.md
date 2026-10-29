@@ -53,12 +53,14 @@ yk rm 1             # 確認プロンプト (y/N) を表示
 yk rm 1 -f          # 確認なしで即時削除 (複数指定可: yk rm 1 2 -f)
 
 # 定期タスクの管理 (alias: r)
-yk routine list                               # 定期タスク雛形一覧 (alias: ls)
-yk routine add "週次レビュー" -f mon -p high   # 毎週月曜の定期タスク追加 (alias: a)
-yk routine add "日次ふりかえり" -f daily -p medium # 毎日の定期タスク追加
-yk routine rm 1                               # 定期タスクの削除 (alias: delete, del)
-yk routine generate                           # 今日の定期タスクを発行 (alias: gen)
-yk routine generate 1                         # 特定IDの定期タスクを発行
+yk routine list                                       # 定期タスク雛形一覧 (alias: ls)
+yk routine add "週報作成" -f mon -d fri -p high        # 毎週月曜追加・金曜期日の定期タスク追加 (alias: a)
+yk routine add "ゴミ出し" -f tue                      # 毎週火曜追加・火曜期日（-d省略時は追加曜日と同じ）
+yk routine add "読書" -f sat -d none                  # 毎週土曜追加・期日なし
+yk routine add "日次ふりかえり" -f daily -p medium    # 毎日の定期タスク追加（期日: 当日）
+yk routine rm 1                                       # 定期タスクの削除 (alias: delete, del)
+yk routine generate                                   # 到来した定期タスクを発行 (alias: gen)
+yk routine generate 1                                 # 特定IDの定期タスクを即時手動発行
 ```
 
 ## TUIキー操作一覧
