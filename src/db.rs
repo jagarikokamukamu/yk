@@ -259,11 +259,74 @@ impl Db {
         Ok(())
     }
 
+    pub fn get_task_by_id(&self, id: i64) -> Result<Option<Task>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, title, description, status, priority, due_date, created_at, updated_at, completed_at
+             FROM tasks WHERE id = ?1",
+        )?;
+
+        let mut rows = stmt.query_map(params![id], |row| {
+            let id: i64 = row.get(0)?;
+            let title: String = row.get(1)?;
+            let description: String = row.get(2)?;
+            let status_str: String = row.get(3)?;
+            let priority_str: String = row.get(4)?;
+            let due_date_str: Option<String> = row.get(5)?;
+            let created_at_str: String = row.get(6)?;
+            let updated_at_str: String = row.get(7)?;
+            let completed_at_str: Option<String> = row.get(8)?;
+
+            let status = TaskStatus::from_str_loose(&status_str);
+            let priority = Priority::from_str_loose(&priority_str);
+
+            let due_date =
+                due_date_str.and_then(|s| NaiveDate::parse_from_str(&s, "%Y-%m-%d").ok());
+            let created_at = DateTime::parse_from_rfc3339(&created_at_str)
+                .map(|dt| dt.with_timezone(&Local))
+                .unwrap_or_else(|_| Local::now());
+            let updated_at = DateTime::parse_from_rfc3339(&updated_at_str)
+                .map(|dt| dt.with_timezone(&Local))
+                .unwrap_or_else(|_| Local::now());
+            let completed_at = completed_at_str.and_then(|s| {
+                DateTime::parse_from_rfc3339(&s)
+                    .map(|dt| dt.with_timezone(&Local))
+                    .ok()
+            });
+
+            Ok(Task {
+                id,
+                title,
+                description,
+                status,
+                priority,
+                due_date,
+                created_at,
+                updated_at,
+                completed_at,
+            })
+        })?;
+
+        if let Some(task) = rows.next() {
+            Ok(Some(task?))
+        } else {
+            Ok(None)
+        }
+    }
+
     pub fn set_parallel_in_progress(&self, id: i64) -> Result<()> {
         let now = Local::now().to_rfc3339();
         self.conn.execute(
             "UPDATE tasks SET status = ?1, completed_at = NULL, updated_at = ?2 WHERE id = ?3",
             params![TaskStatus::InProgress.as_str(), now, id],
+        )?;
+        Ok(())
+    }
+
+    pub fn set_done(&self, id: i64) -> Result<()> {
+        let now = Local::now().to_rfc3339();
+        self.conn.execute(
+            "UPDATE tasks SET status = ?1, completed_at = ?2, updated_at = ?3 WHERE id = ?4",
+            params![TaskStatus::Done.as_str(), now, now, id],
         )?;
         Ok(())
     }
@@ -324,10 +387,21 @@ mod tests {
         assert_eq!(tasks[0].status, TaskStatus::Todo);
         assert!(tasks[0].completed_at.is_none());
 
+        // Get by ID
+        let task1 = db.get_task_by_id(id1).unwrap().unwrap();
+        assert_eq!(task1.title, "Task 1");
+
+        // Set done
+        db.set_done(id1).unwrap();
+        let task1_done = db.get_task_by_id(id1).unwrap().unwrap();
+        assert_eq!(task1_done.status, TaskStatus::Done);
+        assert!(task1_done.completed_at.is_some());
+
         // Delete
         db.delete_task(id2).unwrap();
         let tasks = db.get_all_tasks().unwrap();
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].id, id1);
+        assert!(db.get_task_by_id(id2).unwrap().is_none());
     }
 }
