@@ -44,6 +44,15 @@ pub enum Commands {
         #[arg(long)]
         archive: bool,
     },
+    /// タスクを進行中状態にする
+    #[command(alias = "doing")]
+    Start {
+        /// 進行中にするタスクID
+        id: i64,
+        /// 他のタスクを変更せず並行して進行中にする（未指定時は排他モード）
+        #[arg(short = 'p', long)]
+        parallel: bool,
+    },
 }
 
 pub fn handle_cli(cli: Cli, db: &Db, config: &Config) -> Result<(), Box<dyn std::error::Error>> {
@@ -119,6 +128,20 @@ pub fn handle_cli(cli: Cli, db: &Db, config: &Config) -> Result<(), Box<dyn std:
                 );
             }
         }
+        Commands::Start { id, parallel } => match db.get_task_by_id(id)? {
+            Some(task) => {
+                if parallel {
+                    db.set_parallel_in_progress(id)?;
+                    println!("タスク #{} を並行進行中にしました: {}", id, task.title);
+                } else {
+                    db.set_exclusive_in_progress(id)?;
+                    println!("タスク #{} を排他進行中にしました: {}", id, task.title);
+                }
+            }
+            None => {
+                eprintln!("エラー: タスク #{} は存在しません。", id);
+            }
+        },
     }
 
     Ok(())
@@ -127,6 +150,18 @@ pub fn handle_cli(cli: Cli, db: &Db, config: &Config) -> Result<(), Box<dyn std:
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_cli_parse_start() {
+        let cli = Cli::try_parse_from(["yk", "start", "1", "-p"]).unwrap();
+        assert_eq!(
+            cli.command,
+            Some(Commands::Start {
+                id: 1,
+                parallel: true
+            })
+        );
+    }
 
     #[test]
     fn test_cli_parse_add() {
