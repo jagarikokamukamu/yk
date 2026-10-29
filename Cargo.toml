@@ -1,0 +1,17 @@
+[package]
+name = "yk"
+version = "0.1.0"
+edition = "2021"
+description = "A fast and elegant TUI Todo management tool (yarukoto)"
+
+[dependencies]
+ratatui = "0.29.0"
+crossterm = "0.28.1"
+rusqlite = { version = "0.32.1", features = ["bundled", "chrono"] }
+dirs = "5.0.1"
+chrono = { version = "0.4.39", features = ["serde"] }
+serde = { version = "1.0.217", features = ["derive"] }
+toml = "0.8.19"
+
+[dev-dependencies]
+tempfile = "3.16.0"

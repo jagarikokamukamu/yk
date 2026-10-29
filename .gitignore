@@ -1,0 +1,15 @@
+/target
+
+# SQLite
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+tasks.db
+
+# Config
+config.toml
+
+# OS Files
+.DS_Store
+Thumbs.db
