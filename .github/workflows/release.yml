@@ -25,9 +25,19 @@ jobs:
             exit 1
           fi
 
+  create-release:
+    name: Create GitHub Release
+    needs: check-version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: taiki-e/create-gh-release-action@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
   upload-assets:
     name: Build & Release (${{ matrix.target }})
-    needs: check-version
+    needs: create-release
     strategy:
       fail-fast: false
       matrix:
