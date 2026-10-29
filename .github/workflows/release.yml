@@ -9,8 +9,25 @@ permissions:
   contents: write
 
 jobs:
+  check-version:
+    name: Check version matches tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Verify Cargo.toml version matches git tag
+        run: |
+          CARGO_VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          echo "Cargo.toml version: $CARGO_VERSION"
+          echo "Git tag version:    $TAG_VERSION"
+          if [ "$CARGO_VERSION" != "$TAG_VERSION" ]; then
+            echo "Error: Git tag version ($TAG_VERSION) does not match Cargo.toml version ($CARGO_VERSION)!"
+            exit 1
+          fi
+
   upload-assets:
     name: Build & Release (${{ matrix.target }})
+    needs: check-version
     strategy:
       fail-fast: false
       matrix:
