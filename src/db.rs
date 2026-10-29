@@ -1,9 +1,9 @@
-use chrono::{DateTime, Local, NaiveDate};
+use chrono::{DateTime, Datelike, Duration, Local, NaiveDate};
 use rusqlite::{params, Connection, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::model::{Priority, Task, TaskStatus};
+use crate::model::{Priority, Routine, RoutineFrequency, Task, TaskStatus};
 
 pub fn get_db_path() -> PathBuf {
     if let Ok(val) = std::env::var("YK_DB_PATH") {
@@ -60,16 +60,37 @@ impl Db {
                 due_date TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
-                completed_at TEXT
+                completed_at TEXT,
+                routine_id INTEGER
             );",
             [],
         )?;
+
+        // Ensure routine_id exists for existing tables
+        let _ = self
+            .conn
+            .execute("ALTER TABLE tasks ADD COLUMN routine_id INTEGER;", []);
+
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS routines (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                priority TEXT NOT NULL,
+                frequency TEXT NOT NULL,
+                last_generated_date TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );",
+            [],
+        )?;
+
         Ok(())
     }
 
     pub fn get_all_tasks(&self) -> Result<Vec<Task>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, title, description, status, priority, due_date, created_at, updated_at, completed_at
+            "SELECT id, title, description, status, priority, due_date, created_at, updated_at, completed_at, routine_id
              FROM tasks ORDER BY id ASC",
         )?;
 
@@ -83,6 +104,7 @@ impl Db {
             let created_at_str: String = row.get(6)?;
             let updated_at_str: String = row.get(7)?;
             let completed_at_str: Option<String> = row.get(8)?;
+            let routine_id: Option<i64> = row.get(9)?;
 
             let status = TaskStatus::from_str_loose(&status_str);
             let priority = Priority::from_str_loose(&priority_str);
@@ -111,6 +133,7 @@ impl Db {
                 created_at,
                 updated_at,
                 completed_at,
+                routine_id,
             })
         })?;
 
@@ -129,6 +152,18 @@ impl Db {
         priority: Priority,
         due_date: Option<NaiveDate>,
     ) -> Result<i64> {
+        self.add_task_with_routine(title, description, status, priority, due_date, None)
+    }
+
+    pub fn add_task_with_routine(
+        &self,
+        title: &str,
+        description: &str,
+        status: TaskStatus,
+        priority: Priority,
+        due_date: Option<NaiveDate>,
+        routine_id: Option<i64>,
+    ) -> Result<i64> {
         let now = Local::now();
         let now_str = now.to_rfc3339();
         let due_date_str = due_date.map(|d| d.format("%Y-%m-%d").to_string());
@@ -139,8 +174,8 @@ impl Db {
         };
 
         self.conn.execute(
-            "INSERT INTO tasks (title, description, status, priority, due_date, created_at, updated_at, completed_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            "INSERT INTO tasks (title, description, status, priority, due_date, created_at, updated_at, completed_at, routine_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
                 title,
                 description,
@@ -149,7 +184,8 @@ impl Db {
                 due_date_str,
                 now_str,
                 now_str,
-                completed_at_str
+                completed_at_str,
+                routine_id
             ],
         )?;
 
@@ -261,7 +297,7 @@ impl Db {
 
     pub fn get_task_by_id(&self, id: i64) -> Result<Option<Task>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, title, description, status, priority, due_date, created_at, updated_at, completed_at
+            "SELECT id, title, description, status, priority, due_date, created_at, updated_at, completed_at, routine_id
              FROM tasks WHERE id = ?1",
         )?;
 
@@ -275,6 +311,7 @@ impl Db {
             let created_at_str: String = row.get(6)?;
             let updated_at_str: String = row.get(7)?;
             let completed_at_str: Option<String> = row.get(8)?;
+            let routine_id: Option<i64> = row.get(9)?;
 
             let status = TaskStatus::from_str_loose(&status_str);
             let priority = Priority::from_str_loose(&priority_str);
@@ -303,6 +340,7 @@ impl Db {
                 created_at,
                 updated_at,
                 completed_at,
+                routine_id,
             })
         })?;
 
@@ -329,6 +367,240 @@ impl Db {
             params![TaskStatus::Done.as_str(), now, now, id],
         )?;
         Ok(())
+    }
+
+    pub fn get_all_routines(&self) -> Result<Vec<Routine>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, title, description, priority, frequency, last_generated_date, created_at, updated_at
+             FROM routines ORDER BY id ASC",
+        )?;
+
+        let rows = stmt.query_map([], |row| {
+            let id: i64 = row.get(0)?;
+            let title: String = row.get(1)?;
+            let description: String = row.get(2)?;
+            let priority_str: String = row.get(3)?;
+            let freq_str: String = row.get(4)?;
+            let last_gen_str: Option<String> = row.get(5)?;
+            let created_at_str: String = row.get(6)?;
+            let updated_at_str: String = row.get(7)?;
+
+            let priority = Priority::from_str_loose(&priority_str);
+            let frequency = RoutineFrequency::from_str_loose(&freq_str);
+            let last_generated_date =
+                last_gen_str.and_then(|s| NaiveDate::parse_from_str(&s, "%Y-%m-%d").ok());
+            let created_at = DateTime::parse_from_rfc3339(&created_at_str)
+                .map(|dt| dt.with_timezone(&Local))
+                .unwrap_or_else(|_| Local::now());
+            let updated_at = DateTime::parse_from_rfc3339(&updated_at_str)
+                .map(|dt| dt.with_timezone(&Local))
+                .unwrap_or_else(|_| Local::now());
+
+            Ok(Routine {
+                id,
+                title,
+                description,
+                priority,
+                frequency,
+                last_generated_date,
+                created_at,
+                updated_at,
+            })
+        })?;
+
+        let mut routines = Vec::new();
+        for r in rows {
+            routines.push(r?);
+        }
+        Ok(routines)
+    }
+
+    pub fn get_routine_by_id(&self, id: i64) -> Result<Option<Routine>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, title, description, priority, frequency, last_generated_date, created_at, updated_at
+             FROM routines WHERE id = ?1",
+        )?;
+
+        let mut rows = stmt.query_map(params![id], |row| {
+            let id: i64 = row.get(0)?;
+            let title: String = row.get(1)?;
+            let description: String = row.get(2)?;
+            let priority_str: String = row.get(3)?;
+            let freq_str: String = row.get(4)?;
+            let last_gen_str: Option<String> = row.get(5)?;
+            let created_at_str: String = row.get(6)?;
+            let updated_at_str: String = row.get(7)?;
+
+            let priority = Priority::from_str_loose(&priority_str);
+            let frequency = RoutineFrequency::from_str_loose(&freq_str);
+            let last_generated_date =
+                last_gen_str.and_then(|s| NaiveDate::parse_from_str(&s, "%Y-%m-%d").ok());
+            let created_at = DateTime::parse_from_rfc3339(&created_at_str)
+                .map(|dt| dt.with_timezone(&Local))
+                .unwrap_or_else(|_| Local::now());
+            let updated_at = DateTime::parse_from_rfc3339(&updated_at_str)
+                .map(|dt| dt.with_timezone(&Local))
+                .unwrap_or_else(|_| Local::now());
+
+            Ok(Routine {
+                id,
+                title,
+                description,
+                priority,
+                frequency,
+                last_generated_date,
+                created_at,
+                updated_at,
+            })
+        })?;
+
+        if let Some(r) = rows.next() {
+            Ok(Some(r?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn add_routine(
+        &self,
+        title: &str,
+        description: &str,
+        priority: Priority,
+        frequency: RoutineFrequency,
+    ) -> Result<i64> {
+        let now = Local::now().to_rfc3339();
+        self.conn.execute(
+            "INSERT INTO routines (title, description, priority, frequency, last_generated_date, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?6)",
+            params![
+                title,
+                description,
+                priority.as_str(),
+                frequency.as_str(),
+                now,
+                now
+            ],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    pub fn update_routine(
+        &self,
+        id: i64,
+        title: &str,
+        description: &str,
+        priority: Priority,
+        frequency: RoutineFrequency,
+    ) -> Result<()> {
+        let now = Local::now().to_rfc3339();
+        self.conn.execute(
+            "UPDATE routines
+             SET title = ?1, description = ?2, priority = ?3, frequency = ?4, updated_at = ?5
+             WHERE id = ?6",
+            params![
+                title,
+                description,
+                priority.as_str(),
+                frequency.as_str(),
+                now,
+                id
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_routine(&self, id: i64) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM routines WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    fn update_routine_last_generated(&self, id: i64, date: NaiveDate) -> Result<()> {
+        let now = Local::now().to_rfc3339();
+        let date_str = date.format("%Y-%m-%d").to_string();
+        self.conn.execute(
+            "UPDATE routines SET last_generated_date = ?1, updated_at = ?2 WHERE id = ?3",
+            params![date_str, now, id],
+        )?;
+        Ok(())
+    }
+
+    pub fn generate_routine_instances(&self) -> Result<Vec<i64>> {
+        let routines = self.get_all_routines()?;
+        let today = Local::now().date_naive();
+        let mut generated_ids = Vec::new();
+
+        for routine in routines {
+            let should_generate = match routine.frequency {
+                RoutineFrequency::Daily => routine.last_generated_date != Some(today),
+                RoutineFrequency::Weekly(target_weekday) => {
+                    let current_weekday_num = today.weekday().num_days_from_monday() as i64;
+                    let monday = today - Duration::days(current_weekday_num);
+                    let target_weekday_num = target_weekday.num_days_from_monday() as i64;
+                    let target_date = monday + Duration::days(target_weekday_num);
+
+                    routine.last_generated_date != Some(target_date)
+                }
+            };
+
+            if should_generate {
+                let due_date = match routine.frequency {
+                    RoutineFrequency::Daily => Some(today),
+                    RoutineFrequency::Weekly(target_weekday) => {
+                        let current_weekday_num = today.weekday().num_days_from_monday() as i64;
+                        let monday = today - Duration::days(current_weekday_num);
+                        let target_weekday_num = target_weekday.num_days_from_monday() as i64;
+                        Some(monday + Duration::days(target_weekday_num))
+                    }
+                };
+
+                let task_id = self.add_task_with_routine(
+                    &routine.title,
+                    &routine.description,
+                    TaskStatus::Todo,
+                    routine.priority,
+                    due_date,
+                    Some(routine.id),
+                )?;
+
+                let target_date = due_date.unwrap_or(today);
+                self.update_routine_last_generated(routine.id, target_date)?;
+                generated_ids.push(task_id);
+            }
+        }
+
+        Ok(generated_ids)
+    }
+
+    pub fn generate_single_routine_instance(&self, routine_id: i64) -> Result<Option<i64>> {
+        let routine = match self.get_routine_by_id(routine_id)? {
+            Some(r) => r,
+            None => return Ok(None),
+        };
+
+        let today = Local::now().date_naive();
+        let due_date = match routine.frequency {
+            RoutineFrequency::Daily => Some(today),
+            RoutineFrequency::Weekly(target_weekday) => {
+                let current_weekday_num = today.weekday().num_days_from_monday() as i64;
+                let monday = today - Duration::days(current_weekday_num);
+                let target_weekday_num = target_weekday.num_days_from_monday() as i64;
+                Some(monday + Duration::days(target_weekday_num))
+            }
+        };
+
+        let task_id = self.add_task_with_routine(
+            &routine.title,
+            &routine.description,
+            TaskStatus::Todo,
+            routine.priority,
+            due_date,
+            Some(routine.id),
+        )?;
+
+        let target_date = due_date.unwrap_or(today);
+        self.update_routine_last_generated(routine.id, target_date)?;
+        Ok(Some(task_id))
     }
 }
 
@@ -403,5 +675,58 @@ mod tests {
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].id, id1);
         assert!(db.get_task_by_id(id2).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_db_routine_crud_and_generation() {
+        let db = Db::open_in_memory().unwrap();
+
+        // Add routines
+        let r1 = db
+            .add_routine(
+                "Daily Review",
+                "Every day",
+                Priority::Medium,
+                RoutineFrequency::Daily,
+            )
+            .unwrap();
+        let r2 = db
+            .add_routine(
+                "Weekly Plan",
+                "Every Monday",
+                Priority::High,
+                RoutineFrequency::Weekly(chrono::Weekday::Mon),
+            )
+            .unwrap();
+
+        let routines = db.get_all_routines().unwrap();
+        assert_eq!(routines.len(), 2);
+        assert_eq!(routines[0].title, "Daily Review");
+        assert_eq!(
+            routines[1].frequency,
+            RoutineFrequency::Weekly(chrono::Weekday::Mon)
+        );
+
+        // Generate instances
+        let gen_ids = db.generate_routine_instances().unwrap();
+        assert_eq!(gen_ids.len(), 2);
+
+        // Second generation on same day should generate 0 tasks (already generated)
+        let gen_ids_second = db.generate_routine_instances().unwrap();
+        assert_eq!(gen_ids_second.len(), 0);
+
+        let tasks = db.get_all_tasks().unwrap();
+        assert_eq!(tasks.len(), 2);
+        assert_eq!(tasks[0].routine_id, Some(r1));
+        assert_eq!(tasks[1].routine_id, Some(r2));
+
+        // Single routine manual generation
+        let manual_id = db.generate_single_routine_instance(r1).unwrap();
+        assert!(manual_id.is_some());
+        assert_eq!(db.get_all_tasks().unwrap().len(), 3);
+
+        // Delete routine
+        db.delete_routine(r2).unwrap();
+        assert_eq!(db.get_all_routines().unwrap().len(), 1);
     }
 }
