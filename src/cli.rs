@@ -53,6 +53,13 @@ pub enum Commands {
         #[arg(short = 'p', long)]
         parallel: bool,
     },
+    /// タスクを完了状態にする
+    #[command(alias = "finish", alias = "complete")]
+    Done {
+        /// 完了にするタスクID（複数指定可）
+        #[arg(required = true)]
+        ids: Vec<i64>,
+    },
 }
 
 pub fn handle_cli(cli: Cli, db: &Db, config: &Config) -> Result<(), Box<dyn std::error::Error>> {
@@ -142,6 +149,19 @@ pub fn handle_cli(cli: Cli, db: &Db, config: &Config) -> Result<(), Box<dyn std:
                 eprintln!("エラー: タスク #{} は存在しません。", id);
             }
         },
+        Commands::Done { ids } => {
+            for id in ids {
+                match db.get_task_by_id(id)? {
+                    Some(task) => {
+                        db.set_done(id)?;
+                        println!("タスク #{} を完了にしました: {}", id, task.title);
+                    }
+                    None => {
+                        eprintln!("エラー: タスク #{} は存在しません。", id);
+                    }
+                }
+            }
+        }
     }
 
     Ok(())
@@ -150,6 +170,15 @@ pub fn handle_cli(cli: Cli, db: &Db, config: &Config) -> Result<(), Box<dyn std:
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_cli_parse_done() {
+        let cli = Cli::try_parse_from(["yk", "done", "1", "2"]).unwrap();
+        assert_eq!(
+            cli.command,
+            Some(Commands::Done { ids: vec![1, 2] })
+        );
+    }
 
     #[test]
     fn test_cli_parse_start() {
