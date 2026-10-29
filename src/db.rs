@@ -1,9 +1,11 @@
-use chrono::{DateTime, Datelike, Duration, Local, NaiveDate};
+use chrono::{DateTime, Local, NaiveDate, Weekday};
 use rusqlite::{params, Connection, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::model::{Priority, Routine, RoutineFrequency, Task, TaskStatus};
+use crate::model::{
+    parse_weekday_loose, weekday_to_str, Priority, Routine, RoutineFrequency, Task, TaskStatus,
+};
 
 pub fn get_db_path() -> PathBuf {
     if let Ok(val) = std::env::var("YK_DB_PATH") {
@@ -78,12 +80,18 @@ impl Db {
                 description TEXT NOT NULL DEFAULT '',
                 priority TEXT NOT NULL,
                 frequency TEXT NOT NULL,
+                due_weekday TEXT,
                 last_generated_date TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );",
             [],
         )?;
+
+        // Ensure due_weekday exists for existing routines tables
+        let _ = self
+            .conn
+            .execute("ALTER TABLE routines ADD COLUMN due_weekday TEXT;", []);
 
         Ok(())
     }
@@ -371,7 +379,7 @@ impl Db {
 
     pub fn get_all_routines(&self) -> Result<Vec<Routine>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, title, description, priority, frequency, last_generated_date, created_at, updated_at
+            "SELECT id, title, description, priority, frequency, due_weekday, last_generated_date, created_at, updated_at
              FROM routines ORDER BY id ASC",
         )?;
 
@@ -381,12 +389,14 @@ impl Db {
             let description: String = row.get(2)?;
             let priority_str: String = row.get(3)?;
             let freq_str: String = row.get(4)?;
-            let last_gen_str: Option<String> = row.get(5)?;
-            let created_at_str: String = row.get(6)?;
-            let updated_at_str: String = row.get(7)?;
+            let due_weekday_str: Option<String> = row.get(5)?;
+            let last_gen_str: Option<String> = row.get(6)?;
+            let created_at_str: String = row.get(7)?;
+            let updated_at_str: String = row.get(8)?;
 
             let priority = Priority::from_str_loose(&priority_str);
             let frequency = RoutineFrequency::from_str_loose(&freq_str);
+            let due_weekday = due_weekday_str.and_then(|s| parse_weekday_loose(&s));
             let last_generated_date =
                 last_gen_str.and_then(|s| NaiveDate::parse_from_str(&s, "%Y-%m-%d").ok());
             let created_at = DateTime::parse_from_rfc3339(&created_at_str)
@@ -402,6 +412,7 @@ impl Db {
                 description,
                 priority,
                 frequency,
+                due_weekday,
                 last_generated_date,
                 created_at,
                 updated_at,
@@ -417,7 +428,7 @@ impl Db {
 
     pub fn get_routine_by_id(&self, id: i64) -> Result<Option<Routine>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, title, description, priority, frequency, last_generated_date, created_at, updated_at
+            "SELECT id, title, description, priority, frequency, due_weekday, last_generated_date, created_at, updated_at
              FROM routines WHERE id = ?1",
         )?;
 
@@ -427,12 +438,14 @@ impl Db {
             let description: String = row.get(2)?;
             let priority_str: String = row.get(3)?;
             let freq_str: String = row.get(4)?;
-            let last_gen_str: Option<String> = row.get(5)?;
-            let created_at_str: String = row.get(6)?;
-            let updated_at_str: String = row.get(7)?;
+            let due_weekday_str: Option<String> = row.get(5)?;
+            let last_gen_str: Option<String> = row.get(6)?;
+            let created_at_str: String = row.get(7)?;
+            let updated_at_str: String = row.get(8)?;
 
             let priority = Priority::from_str_loose(&priority_str);
             let frequency = RoutineFrequency::from_str_loose(&freq_str);
+            let due_weekday = due_weekday_str.and_then(|s| parse_weekday_loose(&s));
             let last_generated_date =
                 last_gen_str.and_then(|s| NaiveDate::parse_from_str(&s, "%Y-%m-%d").ok());
             let created_at = DateTime::parse_from_rfc3339(&created_at_str)
@@ -448,6 +461,7 @@ impl Db {
                 description,
                 priority,
                 frequency,
+                due_weekday,
                 last_generated_date,
                 created_at,
                 updated_at,
@@ -467,16 +481,43 @@ impl Db {
         description: &str,
         priority: Priority,
         frequency: RoutineFrequency,
+        due_weekday: Option<Weekday>,
+    ) -> Result<i64> {
+        self.add_routine_at(
+            title,
+            description,
+            priority,
+            frequency,
+            due_weekday,
+            Local::now().date_naive(),
+        )
+    }
+
+    pub fn add_routine_at(
+        &self,
+        title: &str,
+        description: &str,
+        priority: Priority,
+        frequency: RoutineFrequency,
+        due_weekday: Option<Weekday>,
+        today: NaiveDate,
     ) -> Result<i64> {
         let now = Local::now().to_rfc3339();
+        let due_str = weekday_to_str(due_weekday);
+        let init_last_gen = Routine::latest_spawn_date(frequency, today)
+            .format("%Y-%m-%d")
+            .to_string();
+
         self.conn.execute(
-            "INSERT INTO routines (title, description, priority, frequency, last_generated_date, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?6)",
+            "INSERT INTO routines (title, description, priority, frequency, due_weekday, last_generated_date, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 title,
                 description,
                 priority.as_str(),
                 frequency.as_str(),
+                due_str,
+                init_last_gen,
                 now,
                 now
             ],
@@ -491,17 +532,37 @@ impl Db {
         description: &str,
         priority: Priority,
         frequency: RoutineFrequency,
+        due_weekday: Option<Weekday>,
     ) -> Result<()> {
         let now = Local::now().to_rfc3339();
+        let due_str = weekday_to_str(due_weekday);
+        let prev_routine = self.get_routine_by_id(id)?;
+
+        // If frequency changed, reset last_generated_date to current latest_spawn_date
+        // so that past cycles don't unexpectedly trigger.
+        let new_last_gen = match prev_routine {
+            Some(ref r) if r.frequency != frequency => Some(
+                Routine::latest_spawn_date(frequency, Local::now().date_naive())
+                    .format("%Y-%m-%d")
+                    .to_string(),
+            ),
+            Some(r) => r
+                .last_generated_date
+                .map(|d| d.format("%Y-%m-%d").to_string()),
+            None => None,
+        };
+
         self.conn.execute(
             "UPDATE routines
-             SET title = ?1, description = ?2, priority = ?3, frequency = ?4, updated_at = ?5
-             WHERE id = ?6",
+             SET title = ?1, description = ?2, priority = ?3, frequency = ?4, due_weekday = ?5, last_generated_date = ?6, updated_at = ?7
+             WHERE id = ?8",
             params![
                 title,
                 description,
                 priority.as_str(),
                 frequency.as_str(),
+                due_str,
+                new_last_gen,
                 now,
                 id
             ],
@@ -526,33 +587,21 @@ impl Db {
     }
 
     pub fn generate_routine_instances(&self) -> Result<Vec<i64>> {
+        self.generate_routine_instances_at(Local::now().date_naive())
+    }
+
+    pub fn generate_routine_instances_at(&self, today: NaiveDate) -> Result<Vec<i64>> {
         let routines = self.get_all_routines()?;
-        let today = Local::now().date_naive();
         let mut generated_ids = Vec::new();
 
         for routine in routines {
-            let should_generate = match routine.frequency {
-                RoutineFrequency::Daily => routine.last_generated_date != Some(today),
-                RoutineFrequency::Weekly(target_weekday) => {
-                    let current_weekday_num = today.weekday().num_days_from_monday() as i64;
-                    let monday = today - Duration::days(current_weekday_num);
-                    let target_weekday_num = target_weekday.num_days_from_monday() as i64;
-                    let target_date = monday + Duration::days(target_weekday_num);
-
-                    routine.last_generated_date != Some(target_date)
-                }
-            };
+            let spawn_date = Routine::latest_spawn_date(routine.frequency, today);
+            let should_generate = routine
+                .last_generated_date
+                .is_none_or(|last| last < spawn_date);
 
             if should_generate {
-                let due_date = match routine.frequency {
-                    RoutineFrequency::Daily => Some(today),
-                    RoutineFrequency::Weekly(target_weekday) => {
-                        let current_weekday_num = today.weekday().num_days_from_monday() as i64;
-                        let monday = today - Duration::days(current_weekday_num);
-                        let target_weekday_num = target_weekday.num_days_from_monday() as i64;
-                        Some(monday + Duration::days(target_weekday_num))
-                    }
-                };
+                let due_date = routine.due_date_from_spawn(spawn_date);
 
                 let task_id = self.add_task_with_routine(
                     &routine.title,
@@ -563,8 +612,7 @@ impl Db {
                     Some(routine.id),
                 )?;
 
-                let target_date = due_date.unwrap_or(today);
-                self.update_routine_last_generated(routine.id, target_date)?;
+                self.update_routine_last_generated(routine.id, spawn_date)?;
                 generated_ids.push(task_id);
             }
         }
@@ -579,15 +627,7 @@ impl Db {
         };
 
         let today = Local::now().date_naive();
-        let due_date = match routine.frequency {
-            RoutineFrequency::Daily => Some(today),
-            RoutineFrequency::Weekly(target_weekday) => {
-                let current_weekday_num = today.weekday().num_days_from_monday() as i64;
-                let monday = today - Duration::days(current_weekday_num);
-                let target_weekday_num = target_weekday.num_days_from_monday() as i64;
-                Some(monday + Duration::days(target_weekday_num))
-            }
-        };
+        let due_date = routine.due_date_for_manual_spawn(today);
 
         let task_id = self.add_task_with_routine(
             &routine.title,
@@ -598,8 +638,8 @@ impl Db {
             Some(routine.id),
         )?;
 
-        let target_date = due_date.unwrap_or(today);
-        self.update_routine_last_generated(routine.id, target_date)?;
+        let spawn_date = Routine::latest_spawn_date(routine.frequency, today);
+        self.update_routine_last_generated(routine.id, spawn_date)?;
         Ok(Some(task_id))
     }
 }
@@ -681,52 +721,64 @@ mod tests {
     fn test_db_routine_crud_and_generation() {
         let db = Db::open_in_memory().unwrap();
 
-        // Add routines
-        let r1 = db
-            .add_routine(
+        // Simulate Thursday 2026-10-29
+        let thu = NaiveDate::from_ymd_opt(2026, 10, 29).unwrap();
+
+        // Add a Tuesday routine on Thursday (due on Friday)
+        let r_tue = db
+            .add_routine_at(
+                "Tuesday Task",
+                "Spawn Tue, Due Fri",
+                Priority::High,
+                RoutineFrequency::Weekly(Weekday::Tue),
+                Some(Weekday::Fri),
+                thu,
+            )
+            .unwrap();
+
+        // Add a Daily routine on Thursday
+        let r_daily = db
+            .add_routine_at(
                 "Daily Review",
                 "Every day",
                 Priority::Medium,
                 RoutineFrequency::Daily,
-            )
-            .unwrap();
-        let r2 = db
-            .add_routine(
-                "Weekly Plan",
-                "Every Monday",
-                Priority::High,
-                RoutineFrequency::Weekly(chrono::Weekday::Mon),
+                None,
+                thu,
             )
             .unwrap();
 
-        let routines = db.get_all_routines().unwrap();
-        assert_eq!(routines.len(), 2);
-        assert_eq!(routines[0].title, "Daily Review");
-        assert_eq!(
-            routines[1].frequency,
-            RoutineFrequency::Weekly(chrono::Weekday::Mon)
-        );
+        // 1. On the day of creation (Thursday), auto-generation should NOT retroactively spawn Tuesday's task
+        let gen_thu = db.generate_routine_instances_at(thu).unwrap();
+        assert_eq!(gen_thu.len(), 0);
 
-        // Generate instances
-        let gen_ids = db.generate_routine_instances().unwrap();
-        assert_eq!(gen_ids.len(), 2);
+        // 2. Next day (Friday 2026-10-30): Daily routine spawns, Tuesday routine still waits for next Tuesday
+        let fri = NaiveDate::from_ymd_opt(2026, 10, 30).unwrap();
+        let gen_fri = db.generate_routine_instances_at(fri).unwrap();
+        assert_eq!(gen_fri.len(), 1);
+        let tasks = db.get_all_tasks().unwrap();
+        assert_eq!(tasks[0].routine_id, Some(r_daily));
+        assert_eq!(tasks[0].due_date, Some(fri));
 
-        // Second generation on same day should generate 0 tasks (already generated)
-        let gen_ids_second = db.generate_routine_instances().unwrap();
-        assert_eq!(gen_ids_second.len(), 0);
+        // 3. Next Tuesday (2026-11-03): Both Daily and Tuesday routine spawn!
+        let next_tue = NaiveDate::from_ymd_opt(2026, 11, 3).unwrap();
+        let next_fri = NaiveDate::from_ymd_opt(2026, 11, 6).unwrap();
+        let gen_next_tue = db.generate_routine_instances_at(next_tue).unwrap();
+        assert_eq!(gen_next_tue.len(), 2);
 
         let tasks = db.get_all_tasks().unwrap();
-        assert_eq!(tasks.len(), 2);
-        assert_eq!(tasks[0].routine_id, Some(r1));
-        assert_eq!(tasks[1].routine_id, Some(r2));
+        let tue_task = tasks.iter().find(|t| t.routine_id == Some(r_tue)).unwrap();
+        assert_eq!(tue_task.due_date, Some(next_fri));
 
-        // Single routine manual generation
-        let manual_id = db.generate_single_routine_instance(r1).unwrap();
+        // 4. Second call on same Tuesday generates nothing
+        assert_eq!(db.generate_routine_instances_at(next_tue).unwrap().len(), 0);
+
+        // 5. Manual generation works anytime
+        let manual_id = db.generate_single_routine_instance(r_tue).unwrap();
         assert!(manual_id.is_some());
-        assert_eq!(db.get_all_tasks().unwrap().len(), 3);
 
         // Delete routine
-        db.delete_routine(r2).unwrap();
+        db.delete_routine(r_tue).unwrap();
         assert_eq!(db.get_all_routines().unwrap().len(), 1);
     }
 }

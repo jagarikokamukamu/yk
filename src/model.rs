@@ -75,6 +75,76 @@ impl RoutineFrequency {
     }
 }
 
+pub fn parse_weekday_loose(s: &str) -> Option<Weekday> {
+    let upper = s.trim().to_uppercase();
+    let part = upper.strip_prefix("WEEKLY_").unwrap_or(&upper);
+    match part {
+        "MON" | "MONDAY" | "月" | "月曜" | "月曜日" => Some(Weekday::Mon),
+        "TUE" | "TUESDAY" | "火" | "火曜" | "火曜日" => Some(Weekday::Tue),
+        "WED" | "WEDNESDAY" | "水" | "水曜" | "水曜日" => Some(Weekday::Wed),
+        "THU" | "THURSDAY" | "木" | "木曜" | "木曜日" => Some(Weekday::Thu),
+        "FRI" | "FRIDAY" | "金" | "金曜" | "金曜日" => Some(Weekday::Fri),
+        "SAT" | "SATURDAY" | "土" | "土曜" | "土曜日" => Some(Weekday::Sat),
+        "SUN" | "SUNDAY" | "日" | "日曜" | "日曜日" => Some(Weekday::Sun),
+        _ => None,
+    }
+}
+
+pub fn weekday_to_str(w: Option<Weekday>) -> Option<String> {
+    w.map(|day| format!("{:?}", day).to_uppercase())
+}
+
+pub fn weekday_ja_short(w: Weekday) -> &'static str {
+    match w {
+        Weekday::Mon => "月",
+        Weekday::Tue => "火",
+        Weekday::Wed => "水",
+        Weekday::Thu => "木",
+        Weekday::Fri => "金",
+        Weekday::Sat => "土",
+        Weekday::Sun => "日",
+    }
+}
+
+pub fn due_weekday_label(w: Option<Weekday>) -> String {
+    match w {
+        Some(Weekday::Mon) => "月曜 (Mon)".to_string(),
+        Some(Weekday::Tue) => "火曜 (Tue)".to_string(),
+        Some(Weekday::Wed) => "水曜 (Wed)".to_string(),
+        Some(Weekday::Thu) => "木曜 (Thu)".to_string(),
+        Some(Weekday::Fri) => "金曜 (Fri)".to_string(),
+        Some(Weekday::Sat) => "土曜 (Sat)".to_string(),
+        Some(Weekday::Sun) => "日曜 (Sun)".to_string(),
+        None => "期日なし (None)".to_string(),
+    }
+}
+
+pub fn next_due_weekday(w: Option<Weekday>) -> Option<Weekday> {
+    match w {
+        Some(Weekday::Mon) => Some(Weekday::Tue),
+        Some(Weekday::Tue) => Some(Weekday::Wed),
+        Some(Weekday::Wed) => Some(Weekday::Thu),
+        Some(Weekday::Thu) => Some(Weekday::Fri),
+        Some(Weekday::Fri) => Some(Weekday::Sat),
+        Some(Weekday::Sat) => Some(Weekday::Sun),
+        Some(Weekday::Sun) => None,
+        None => Some(Weekday::Mon),
+    }
+}
+
+pub fn prev_due_weekday(w: Option<Weekday>) -> Option<Weekday> {
+    match w {
+        Some(Weekday::Mon) => None,
+        Some(Weekday::Tue) => Some(Weekday::Mon),
+        Some(Weekday::Wed) => Some(Weekday::Tue),
+        Some(Weekday::Thu) => Some(Weekday::Wed),
+        Some(Weekday::Fri) => Some(Weekday::Thu),
+        Some(Weekday::Sat) => Some(Weekday::Fri),
+        Some(Weekday::Sun) => Some(Weekday::Sat),
+        None => Some(Weekday::Sun),
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Routine {
     pub id: i64,
@@ -82,9 +152,64 @@ pub struct Routine {
     pub description: String,
     pub priority: Priority,
     pub frequency: RoutineFrequency,
+    pub due_weekday: Option<Weekday>,
     pub last_generated_date: Option<NaiveDate>,
     pub created_at: DateTime<Local>,
     pub updated_at: DateTime<Local>,
+}
+
+impl Routine {
+    pub fn schedule_label(&self) -> String {
+        match self.frequency {
+            RoutineFrequency::Daily => "毎日 (期日: 当日)".to_string(),
+            RoutineFrequency::Weekly(spawn_w) => match self.due_weekday {
+                Some(due_w) => format!(
+                    "毎週{}曜 (期日: {}曜)",
+                    weekday_ja_short(spawn_w),
+                    weekday_ja_short(due_w)
+                ),
+                None => format!("毎週{}曜 (期日なし)", weekday_ja_short(spawn_w)),
+            },
+        }
+    }
+
+    pub fn latest_spawn_date(frequency: RoutineFrequency, today: NaiveDate) -> NaiveDate {
+        use chrono::Datelike;
+        match frequency {
+            RoutineFrequency::Daily => today,
+            RoutineFrequency::Weekly(spawn_w) => {
+                let days_since = (today.weekday().num_days_from_monday() as i64
+                    - spawn_w.num_days_from_monday() as i64)
+                    .rem_euclid(7);
+                today - chrono::Duration::days(days_since)
+            }
+        }
+    }
+
+    pub fn due_date_from_spawn(&self, spawn_date: NaiveDate) -> Option<NaiveDate> {
+        match self.frequency {
+            RoutineFrequency::Daily => Some(spawn_date),
+            RoutineFrequency::Weekly(spawn_w) => self.due_weekday.map(|due_w| {
+                let days_until_due = (due_w.num_days_from_monday() as i64
+                    - spawn_w.num_days_from_monday() as i64)
+                    .rem_euclid(7);
+                spawn_date + chrono::Duration::days(days_until_due)
+            }),
+        }
+    }
+
+    pub fn due_date_for_manual_spawn(&self, today: NaiveDate) -> Option<NaiveDate> {
+        use chrono::Datelike;
+        match self.frequency {
+            RoutineFrequency::Daily => Some(today),
+            RoutineFrequency::Weekly(_) => self.due_weekday.map(|due_w| {
+                let days_until_due = (due_w.num_days_from_monday() as i64
+                    - today.weekday().num_days_from_monday() as i64)
+                    .rem_euclid(7);
+                today + chrono::Duration::days(days_until_due)
+            }),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -233,6 +358,60 @@ mod tests {
             RoutineFrequency::from_str_loose("weekly_fri"),
             RoutineFrequency::Weekly(Weekday::Fri)
         );
+    }
+
+    #[test]
+    fn test_routine_spawn_and_due_calculations() {
+        // 2026-10-29 is Thursday
+        let thu = NaiveDate::from_ymd_opt(2026, 10, 29).unwrap();
+        let tue = NaiveDate::from_ymd_opt(2026, 10, 27).unwrap();
+        let fri = NaiveDate::from_ymd_opt(2026, 10, 30).unwrap();
+
+        // Latest spawn date for Tuesday when today is Thursday -> Tuesday of this week (10/27)
+        assert_eq!(
+            Routine::latest_spawn_date(RoutineFrequency::Weekly(Weekday::Tue), thu),
+            tue
+        );
+        // Latest spawn date for Friday when today is Thursday -> Friday of LAST week (10/23)
+        assert_eq!(
+            Routine::latest_spawn_date(RoutineFrequency::Weekly(Weekday::Fri), thu),
+            NaiveDate::from_ymd_opt(2026, 10, 23).unwrap()
+        );
+
+        let now = Local::now();
+        // Case 1: Spawn = Tue, Due = Fri -> spawn 10/27 gives due 10/30 (+3 days)
+        let r1 = Routine {
+            id: 1,
+            title: "Test".to_string(),
+            description: "".to_string(),
+            priority: Priority::Medium,
+            frequency: RoutineFrequency::Weekly(Weekday::Tue),
+            due_weekday: Some(Weekday::Fri),
+            last_generated_date: None,
+            created_at: now,
+            updated_at: now,
+        };
+        assert_eq!(r1.due_date_from_spawn(tue), Some(fri));
+        assert_eq!(r1.schedule_label(), "毎週火曜 (期日: 金曜)");
+
+        // Case 2: Cross-week! Spawn = Fri (10/30), Due = Tue -> due is next Tuesday (11/03, +4 days)
+        let r2 = Routine {
+            due_weekday: Some(Weekday::Tue),
+            frequency: RoutineFrequency::Weekly(Weekday::Fri),
+            ..r1.clone()
+        };
+        assert_eq!(
+            r2.due_date_from_spawn(fri),
+            Some(NaiveDate::from_ymd_opt(2026, 11, 3).unwrap())
+        );
+
+        // Case 3: No due date
+        let r3 = Routine {
+            due_weekday: None,
+            ..r1
+        };
+        assert_eq!(r3.due_date_from_spawn(tue), None);
+        assert_eq!(r3.schedule_label(), "毎週火曜 (期日なし)");
     }
 
     #[test]
