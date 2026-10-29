@@ -87,7 +87,8 @@ impl Db {
             let status = TaskStatus::from_str_loose(&status_str);
             let priority = Priority::from_str_loose(&priority_str);
 
-            let due_date = due_date_str.and_then(|s| NaiveDate::parse_from_str(&s, "%Y-%m-%d").ok());
+            let due_date =
+                due_date_str.and_then(|s| NaiveDate::parse_from_str(&s, "%Y-%m-%d").ok());
             let created_at = DateTime::parse_from_rfc3339(&created_at_str)
                 .map(|dt| dt.with_timezone(&Local))
                 .unwrap_or_else(|_| Local::now());
@@ -204,7 +205,8 @@ impl Db {
     }
 
     pub fn delete_task(&self, id: i64) -> Result<()> {
-        self.conn.execute("DELETE FROM tasks WHERE id = ?1", params![id])?;
+        self.conn
+            .execute("DELETE FROM tasks WHERE id = ?1", params![id])?;
         Ok(())
     }
 
@@ -239,7 +241,12 @@ impl Db {
         // Reset all InProgress tasks to Todo
         tx.execute(
             "UPDATE tasks SET status = ?1, updated_at = ?2 WHERE status = ?3 AND id != ?4",
-            params![TaskStatus::Todo.as_str(), now, TaskStatus::InProgress.as_str(), id],
+            params![
+                TaskStatus::Todo.as_str(),
+                now,
+                TaskStatus::InProgress.as_str(),
+                id
+            ],
         )?;
 
         // Set target task to InProgress and clear completed_at

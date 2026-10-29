@@ -190,7 +190,8 @@ impl App {
                     let _ = self.db.set_exclusive_in_progress(task.id);
                 }
             }
-            (KeyModifiers::SHIFT, KeyCode::Char('I')) | (KeyModifiers::NONE, KeyCode::Char('I')) => {
+            (KeyModifiers::SHIFT, KeyCode::Char('I'))
+            | (KeyModifiers::NONE, KeyCode::Char('I')) => {
                 if let Some(task) = self.selected_task() {
                     let _ = self.db.set_parallel_in_progress(task.id);
                 }
@@ -228,7 +229,8 @@ impl App {
                     self.mode = AppMode::DeleteConfirm(task);
                 }
             }
-            (KeyModifiers::SHIFT, KeyCode::Char('A')) | (KeyModifiers::NONE, KeyCode::Char('A')) => {
+            (KeyModifiers::SHIFT, KeyCode::Char('A'))
+            | (KeyModifiers::NONE, KeyCode::Char('A')) => {
                 self.view_list = match self.view_list {
                     ViewList::Active => ViewList::Archive,
                     ViewList::Archive => ViewList::Active,
@@ -251,13 +253,9 @@ impl App {
                 KeyCode::Enter => {
                     let trimmed = title.trim();
                     if !trimmed.is_empty() {
-                        let _ = self.db.add_task(
-                            trimmed,
-                            "",
-                            TaskStatus::Todo,
-                            Priority::Medium,
-                            None,
-                        );
+                        let _ =
+                            self.db
+                                .add_task(trimmed, "", TaskStatus::Todo, Priority::Medium, None);
                         self.clamp_selection();
                     }
                     self.mode = AppMode::Normal;
@@ -274,14 +272,18 @@ impl App {
     }
 
     fn handle_edit_key(&mut self, key: KeyEvent) {
-        let is_ctrl_enter = key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Enter;
+        let is_ctrl_enter =
+            key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Enter;
         let is_tab = key.code == KeyCode::Tab;
         let is_backtab = key.code == KeyCode::BackTab;
 
         if let AppMode::EditTask(ref mut state) = self.mode {
             // Save on Ctrl+Enter from any field, or Enter from non-description fields
-            if is_ctrl_enter || (key.code == KeyCode::Enter && state.active_field != EditField::Description) {
-                let due_date = NaiveDate::parse_from_str(state.due_date_str.trim(), "%Y-%m-%d").ok();
+            if is_ctrl_enter
+                || (key.code == KeyCode::Enter && state.active_field != EditField::Description)
+            {
+                let due_date =
+                    NaiveDate::parse_from_str(state.due_date_str.trim(), "%Y-%m-%d").ok();
                 let _ = self.db.update_task(
                     state.target_task_id,
                     state.title.trim(),
@@ -366,24 +368,24 @@ impl App {
                 },
                 EditField::DueDate => match key.code {
                     KeyCode::Left => {
-                        let cur_date = NaiveDate::parse_from_str(state.due_date_str.trim(), "%Y-%m-%d")
-                            .unwrap_or_else(|_| Local::now().date_naive());
+                        let cur_date =
+                            NaiveDate::parse_from_str(state.due_date_str.trim(), "%Y-%m-%d")
+                                .unwrap_or_else(|_| Local::now().date_naive());
                         let prev_date = cur_date - Duration::days(1);
                         state.due_date_str = prev_date.format("%Y-%m-%d").to_string();
                     }
                     KeyCode::Right => {
-                        let cur_date = NaiveDate::parse_from_str(state.due_date_str.trim(), "%Y-%m-%d")
-                            .unwrap_or_else(|_| Local::now().date_naive());
+                        let cur_date =
+                            NaiveDate::parse_from_str(state.due_date_str.trim(), "%Y-%m-%d")
+                                .unwrap_or_else(|_| Local::now().date_naive());
                         let next_date = cur_date + Duration::days(1);
                         state.due_date_str = next_date.format("%Y-%m-%d").to_string();
                     }
                     KeyCode::Backspace => {
                         state.due_date_str.pop();
                     }
-                    KeyCode::Char(c) => {
-                        if c.is_ascii_digit() || c == '-' {
-                            state.due_date_str.push(c);
-                        }
+                    KeyCode::Char(c) if c.is_ascii_digit() || c == '-' => {
+                        state.due_date_str.push(c);
                     }
                     _ => {}
                 },

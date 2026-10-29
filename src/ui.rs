@@ -44,9 +44,7 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
         ViewList::Archive => " ARCHIVE ",
     };
     let mode_style = match app.view_list {
-        ViewList::Active => Style::default()
-            .fg(COLOR_CYAN)
-            .add_modifier(Modifier::BOLD),
+        ViewList::Active => Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD),
         ViewList::Archive => Style::default()
             .fg(COLOR_SLATE_PURPLE)
             .add_modifier(Modifier::BOLD),
@@ -101,7 +99,10 @@ fn draw_list(f: &mut Frame, app: &mut App, area: Rect) {
 
                 // 1. Cursor indicator: Leftmost '▶ ' without row reversal
                 let cursor_span = if is_selected {
-                    Span::styled("▶ ", Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD))
+                    Span::styled(
+                        "▶ ",
+                        Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD),
+                    )
                 } else {
                     Span::raw("  ")
                 };
@@ -110,14 +111,18 @@ fn draw_list(f: &mut Frame, app: &mut App, area: Rect) {
                 let bracket_open = Span::styled("[", Style::default().fg(COLOR_BORDER));
                 let indicator_span = Span::styled(
                     task.status.indicator(),
-                    Style::default().fg(status_color(task.status)).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(status_color(task.status))
+                        .add_modifier(Modifier::BOLD),
                 );
                 let bracket_close = Span::styled("] ", Style::default().fg(COLOR_BORDER));
 
                 // 3. Priority indicator
                 let priority_span = Span::styled(
                     format!("{:<3} ", task.priority.indicator()),
-                    Style::default().fg(priority_color(task.priority)).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(priority_color(task.priority))
+                        .add_modifier(Modifier::BOLD),
                 );
 
                 // 4. Title: Bold when selected, strike-through when completed
@@ -136,10 +141,7 @@ fn draw_list(f: &mut Frame, app: &mut App, area: Rect) {
 
                 // 5. Due date with relative badge
                 let (due_str, due_col) = due_date_display(task.due_date, today);
-                let due_span = Span::styled(
-                    format!("  {}", due_str),
-                    Style::default().fg(due_col),
-                );
+                let due_span = Span::styled(format!("  {}", due_str), Style::default().fg(due_col));
 
                 ListItem::new(Line::from(vec![
                     cursor_span,
@@ -200,7 +202,11 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
         Span::styled("Del  ", Style::default().fg(COLOR_TEXT_MUTED)),
         Span::styled("[A] ", Style::default().fg(COLOR_CYAN)),
         Span::styled(
-            if app.view_list == ViewList::Active { "Archive  " } else { "Active  " },
+            if app.view_list == ViewList::Active {
+                "Archive  "
+            } else {
+                "Active  "
+            },
             Style::default().fg(COLOR_TEXT_MUTED),
         ),
         Span::styled("[?] ", Style::default().fg(COLOR_CYAN)),
@@ -232,11 +238,15 @@ fn draw_new_task_modal(f: &mut Frame, title: &str) {
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Length(2), Constraint::Length(1)])
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Length(2),
+            Constraint::Length(1),
+        ])
         .split(inner);
 
-    let prompt = Paragraph::new("タスク名を入力してください:")
-        .style(Style::default().fg(COLOR_TEXT_TITLE));
+    let prompt =
+        Paragraph::new("タスク名を入力してください:").style(Style::default().fg(COLOR_TEXT_TITLE));
     f.render_widget(prompt, chunks[0]);
 
     let input_line = Line::from(vec![
@@ -292,7 +302,10 @@ fn draw_edit_modal(f: &mut Frame, state: &EditState) {
             Span::styled("█", Style::default().fg(COLOR_CYAN)),
         ])
     } else {
-        Line::from(vec![Span::styled(&state.title, Style::default().fg(COLOR_TEXT_TITLE))])
+        Line::from(vec![Span::styled(
+            &state.title,
+            Style::default().fg(COLOR_TEXT_TITLE),
+        )])
     };
     let title_widget = Paragraph::new(title_content).block(
         Block::default()
@@ -322,14 +335,12 @@ fn draw_edit_modal(f: &mut Frame, state: &EditState) {
         spans.push(Span::styled("█", Style::default().fg(COLOR_CYAN)));
         desc_lines[last_idx] = Line::from(spans);
     }
-    let desc_widget = Paragraph::new(desc_lines)
-        .wrap(Wrap { trim: false })
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(" 説明 (Description - Enterで改行) ")
-                .border_style(Style::default().fg(desc_border)),
-        );
+    let desc_widget = Paragraph::new(desc_lines).wrap(Wrap { trim: false }).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" 説明 (Description - Enterで改行) ")
+            .border_style(Style::default().fg(desc_border)),
+    );
     f.render_widget(desc_widget, chunks[1]);
 
     // 3. Status
@@ -350,7 +361,10 @@ fn draw_edit_modal(f: &mut Frame, state: &EditState) {
                 .fg(status_color(state.status))
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("  (Space / ← / → で変更)", Style::default().fg(COLOR_TEXT_MUTED)),
+        Span::styled(
+            "  (Space / ← / → で変更)",
+            Style::default().fg(COLOR_TEXT_MUTED),
+        ),
     ]))
     .block(
         Block::default()
@@ -378,7 +392,10 @@ fn draw_edit_modal(f: &mut Frame, state: &EditState) {
                 .fg(priority_color(state.priority))
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("  (Space / ← / → で変更)", Style::default().fg(COLOR_TEXT_MUTED)),
+        Span::styled(
+            "  (Space / ← / → で変更)",
+            Style::default().fg(COLOR_TEXT_MUTED),
+        ),
     ]))
     .block(
         Block::default()
@@ -401,20 +418,37 @@ fn draw_edit_modal(f: &mut Frame, state: &EditState) {
     let due_content = if state.active_field == EditField::DueDate {
         Line::from(vec![
             Span::styled(
-                if state.due_date_str.is_empty() { "なし" } else { &state.due_date_str },
+                if state.due_date_str.is_empty() {
+                    "なし"
+                } else {
+                    &state.due_date_str
+                },
                 Style::default().fg(COLOR_TEXT_TITLE),
             ),
             Span::styled("█", Style::default().fg(COLOR_CYAN)),
-            Span::styled(format!("  [{}]", relative_label), Style::default().fg(COLOR_GOLD_YELLOW)),
-            Span::styled("  (←/→: ±1日, 直接編集可, 全消去でなし)", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled(
+                format!("  [{}]", relative_label),
+                Style::default().fg(COLOR_GOLD_YELLOW),
+            ),
+            Span::styled(
+                "  (←/→: ±1日, 直接編集可, 全消去でなし)",
+                Style::default().fg(COLOR_TEXT_MUTED),
+            ),
         ])
     } else {
         Line::from(vec![
             Span::styled(
-                if state.due_date_str.is_empty() { "なし" } else { &state.due_date_str },
+                if state.due_date_str.is_empty() {
+                    "なし"
+                } else {
+                    &state.due_date_str
+                },
                 Style::default().fg(COLOR_TEXT_TITLE),
             ),
-            Span::styled(format!("  [{}]", relative_label), Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled(
+                format!("  [{}]", relative_label),
+                Style::default().fg(COLOR_TEXT_MUTED),
+            ),
         ])
     };
     let due_widget = Paragraph::new(due_content).block(
@@ -570,7 +604,11 @@ fn draw_delete_confirm_modal(f: &mut Frame, task: &Task) {
     let block = Block::default()
         .borders(Borders::ALL)
         .title(" 削除確認 ")
-        .title_style(Style::default().fg(COLOR_CRIMSON_RED).add_modifier(Modifier::BOLD))
+        .title_style(
+            Style::default()
+                .fg(COLOR_CRIMSON_RED)
+                .add_modifier(Modifier::BOLD),
+        )
         .border_style(Style::default().fg(COLOR_CRIMSON_RED));
 
     let inner = block.inner(area);
@@ -593,7 +631,12 @@ fn draw_delete_confirm_modal(f: &mut Frame, task: &Task) {
         ]),
         Line::from(""),
         Line::from(vec![
-            Span::styled("[y] ", Style::default().fg(COLOR_CRIMSON_RED).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "[y] ",
+                Style::default()
+                    .fg(COLOR_CRIMSON_RED)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled("削除する   ", Style::default().fg(COLOR_TEXT_TITLE)),
             Span::styled("[n / Esc] ", Style::default().fg(COLOR_TEXT_MUTED)),
             Span::styled("キャンセル", Style::default().fg(COLOR_TEXT_MUTED)),
@@ -621,7 +664,10 @@ fn draw_help_modal(f: &mut Frame) {
         ("メイン一覧", ""),
         ("  j / ↓, k / ↑", "リストの循環移動"),
         ("  Space", "完了トグル (Todo ↔ Done, completed_at自動付与)"),
-        ("  i", "排他進行中 (他をTodoに戻し、選択タスクのみInProgressへ)"),
+        (
+            "  i",
+            "排他進行中 (他をTodoに戻し、選択タスクのみInProgressへ)",
+        ),
         ("  I", "並行進行中 (他タスクを変更せずInProgressへ)"),
         ("  a", "新規タスク追加 (簡易タイトル入力ポップアップ)"),
         ("  e / Enter", "詳細編集モーダル"),
@@ -637,7 +683,10 @@ fn draw_help_modal(f: &mut Frame) {
         ("  Space, ← / →", "ステータス・優先度の順送り・逆送り"),
         ("  ← / → (期日欄)", "1日加減 (テキスト直接入力も可能)"),
         ("  Enter (説明欄)", "改行入力"),
-        ("  Ctrl+Enter", "保存して閉じる (タイトル等ではEnterでも保存可)"),
+        (
+            "  Ctrl+Enter",
+            "保存して閉じる (タイトル等ではEnterでも保存可)",
+        ),
         ("  Esc", "キャンセルして閉じる"),
         ("", ""),
         ("詳細閲覧モーダル", ""),
@@ -651,7 +700,9 @@ fn draw_help_modal(f: &mut Frame) {
             if !key.is_empty() {
                 lines.push(Line::from(Span::styled(
                     format!("■ {}", key),
-                    Style::default().fg(COLOR_GOLD_YELLOW).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(COLOR_GOLD_YELLOW)
+                        .add_modifier(Modifier::BOLD),
                 )));
             } else {
                 lines.push(Line::from(""));

@@ -4,18 +4,18 @@ use ratatui::style::Color;
 use crate::model::{Priority, TaskStatus};
 
 // Semantic Colors (OKLCH L=0.75, C=0.12)
-pub const COLOR_CRIMSON_RED: Color = Color::Rgb(0xf4, 0x89, 0x98);   // 期限切れ / 高優先 (H=12)
-pub const COLOR_AMBER_ORANGE: Color = Color::Rgb(0xe5, 0x9b, 0x5b);  // 本日 / 中優先 (H=60)
-pub const COLOR_GOLD_YELLOW: Color = Color::Rgb(0xbd, 0xb0, 0x4e);   // 進行中 / 明日 (H=102)
-pub const COLOR_SAGE_GREEN: Color = Color::Rgb(0x85, 0xc3, 0x88);    // 完了 (H=145)
-pub const COLOR_CYAN: Color = Color::Rgb(0x5a, 0xbf, 0xdf);          // 選択フォーカス (H=210)
-pub const COLOR_SLATE_PURPLE: Color = Color::Rgb(0xb0, 0xa8, 0xe0);  // 低優先 / 未来 (H=270)
+pub const COLOR_CRIMSON_RED: Color = Color::Rgb(0xf4, 0x89, 0x98); // 期限切れ / 高優先 (H=12)
+pub const COLOR_AMBER_ORANGE: Color = Color::Rgb(0xe5, 0x9b, 0x5b); // 本日 / 中優先 (H=60)
+pub const COLOR_GOLD_YELLOW: Color = Color::Rgb(0xbd, 0xb0, 0x4e); // 進行中 / 明日 (H=102)
+pub const COLOR_SAGE_GREEN: Color = Color::Rgb(0x85, 0xc3, 0x88); // 完了 (H=145)
+pub const COLOR_CYAN: Color = Color::Rgb(0x5a, 0xbf, 0xdf); // 選択フォーカス (H=210)
+pub const COLOR_SLATE_PURPLE: Color = Color::Rgb(0xb0, 0xa8, 0xe0); // 低優先 / 未来 (H=270)
 
 // Neutral Hierarchy (C=0.015, H=240)
-pub const COLOR_TEXT_TITLE: Color = Color::Rgb(0xe6, 0xe6, 0xea);    // L=0.90
-pub const COLOR_TEXT_BODY: Color = Color::Rgb(0xbf, 0xbf, 0xc6);     // L=0.75
-pub const COLOR_TEXT_MUTED: Color = Color::Rgb(0x8c, 0x8c, 0x99);    // L=0.55
-pub const COLOR_BORDER: Color = Color::Rgb(0x56, 0x57, 0x66);        // L=0.38 (境界・カッコ)
+pub const COLOR_TEXT_TITLE: Color = Color::Rgb(0xe6, 0xe6, 0xea); // L=0.90
+pub const COLOR_TEXT_BODY: Color = Color::Rgb(0xbf, 0xbf, 0xc6); // L=0.75
+pub const COLOR_TEXT_MUTED: Color = Color::Rgb(0x8c, 0x8c, 0x99); // L=0.55
+pub const COLOR_BORDER: Color = Color::Rgb(0x56, 0x57, 0x66); // L=0.38 (境界・カッコ)
 
 pub fn status_color(status: TaskStatus) -> Color {
     match status {
@@ -53,10 +53,7 @@ pub fn due_date_display(due_date: Option<NaiveDate>, today: NaiveDate) -> (Strin
             } else if diff == 2 {
                 (format!("{} (明後日)", date_str), COLOR_SLATE_PURPLE)
             } else {
-                (
-                    format!("{} ({}日後)", date_str, diff),
-                    COLOR_SLATE_PURPLE,
-                )
+                (format!("{} ({}日後)", date_str, diff), COLOR_SLATE_PURPLE)
             }
         }
     }
