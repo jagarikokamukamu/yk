@@ -1,4 +1,5 @@
 mod app;
+mod cli;
 mod config;
 mod db;
 mod model;
@@ -9,6 +10,7 @@ use std::io::{self, stdout};
 use std::panic;
 use std::time::Duration;
 
+use clap::Parser;
 use crossterm::{
     event::{self, Event, KeyEventKind},
     execute,
@@ -18,6 +20,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
 use crate::app::App;
+use crate::cli::{handle_cli, Cli};
 use crate::config::Config;
 use crate::db::Db;
 
@@ -31,10 +34,16 @@ fn setup_panic_hook() {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    setup_panic_hook();
-
     let config = Config::load();
     let db = Db::open_default()?;
+
+    let cli = Cli::parse();
+    if cli.command.is_some() {
+        return handle_cli(cli, &db, &config);
+    }
+
+    setup_panic_hook();
+
     let mut app = App::new(db, config);
 
     enable_raw_mode()?;
