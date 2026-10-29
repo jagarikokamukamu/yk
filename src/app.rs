@@ -4,7 +4,9 @@ use ratatui::widgets::ListState;
 
 use crate::config::Config;
 use crate::db::Db;
-use crate::model::{Priority, Routine, RoutineFrequency, Task, TaskStatus};
+use crate::model::{
+    next_due_weekday, prev_due_weekday, Priority, Routine, RoutineFrequency, Task, TaskStatus,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ViewList {
@@ -65,6 +67,7 @@ pub struct ViewTaskState {
 pub enum EditRoutineField {
     Title,
     Frequency,
+    DueWeekday,
     Priority,
     Description,
 }
@@ -73,7 +76,8 @@ impl EditRoutineField {
     pub fn next(&self) -> Self {
         match self {
             EditRoutineField::Title => EditRoutineField::Frequency,
-            EditRoutineField::Frequency => EditRoutineField::Priority,
+            EditRoutineField::Frequency => EditRoutineField::DueWeekday,
+            EditRoutineField::DueWeekday => EditRoutineField::Priority,
             EditRoutineField::Priority => EditRoutineField::Description,
             EditRoutineField::Description => EditRoutineField::Title,
         }
@@ -83,7 +87,8 @@ impl EditRoutineField {
         match self {
             EditRoutineField::Title => EditRoutineField::Description,
             EditRoutineField::Frequency => EditRoutineField::Title,
-            EditRoutineField::Priority => EditRoutineField::Frequency,
+            EditRoutineField::DueWeekday => EditRoutineField::Frequency,
+            EditRoutineField::Priority => EditRoutineField::DueWeekday,
             EditRoutineField::Description => EditRoutineField::Priority,
         }
     }
@@ -96,6 +101,7 @@ pub struct EditRoutineState {
     pub description: String,
     pub priority: Priority,
     pub frequency: RoutineFrequency,
+    pub due_weekday: Option<chrono::Weekday>,
     pub active_field: EditRoutineField,
 }
 
@@ -307,6 +313,7 @@ impl App {
                         description: String::new(),
                         priority: Priority::Medium,
                         frequency: RoutineFrequency::Weekly(chrono::Weekday::Mon),
+                        due_weekday: Some(chrono::Weekday::Mon),
                         active_field: EditRoutineField::Title,
                     });
                 }
@@ -318,6 +325,7 @@ impl App {
                             description: r.description,
                             priority: r.priority,
                             frequency: r.frequency,
+                            due_weekday: r.due_weekday,
                             active_field: EditRoutineField::Title,
                         });
                     }
@@ -595,6 +603,10 @@ impl App {
             {
                 let trimmed_title = state.title.trim();
                 if !trimmed_title.is_empty() {
+                    let effective_due = match state.frequency {
+                        RoutineFrequency::Daily => None,
+                        RoutineFrequency::Weekly(_) => state.due_weekday,
+                    };
                     if let Some(id) = state.target_routine_id {
                         let _ = self.db.update_routine(
                             id,
@@ -602,6 +614,7 @@ impl App {
                             state.description.trim(),
                             state.priority,
                             state.frequency,
+                            effective_due,
                         );
                     } else {
                         let _ = self.db.add_routine(
@@ -609,6 +622,7 @@ impl App {
                             state.description.trim(),
                             state.priority,
                             state.frequency,
+                            effective_due,
                         );
                     }
                 }
@@ -655,15 +669,44 @@ impl App {
                     }
                     _ => {}
                 },
-                EditRoutineField::Frequency => match key.code {
-                    KeyCode::Char(' ') | KeyCode::Right => {
-                        state.frequency = state.frequency.next();
+                EditRoutineField::Frequency => {
+                    let old_freq = state.frequency;
+                    let changed = match key.code {
+                        KeyCode::Char(' ') | KeyCode::Right => {
+                            state.frequency = state.frequency.next();
+                            true
+                        }
+                        KeyCode::Left => {
+                            state.frequency = state.frequency.prev();
+                            true
+                        }
+                        _ => false,
+                    };
+                    if changed {
+                        if let RoutineFrequency::Weekly(new_w) = state.frequency {
+                            let should_sync = match old_freq {
+                                RoutineFrequency::Daily => true,
+                                RoutineFrequency::Weekly(old_w) => state.due_weekday == Some(old_w),
+                            };
+                            if should_sync {
+                                state.due_weekday = Some(new_w);
+                            }
+                        }
                     }
-                    KeyCode::Left => {
-                        state.frequency = state.frequency.prev();
+                }
+                EditRoutineField::DueWeekday => {
+                    if matches!(state.frequency, RoutineFrequency::Weekly(_)) {
+                        match key.code {
+                            KeyCode::Char(' ') | KeyCode::Right => {
+                                state.due_weekday = next_due_weekday(state.due_weekday);
+                            }
+                            KeyCode::Left => {
+                                state.due_weekday = prev_due_weekday(state.due_weekday);
+                            }
+                            _ => {}
+                        }
                     }
-                    _ => {}
-                },
+                }
                 EditRoutineField::Priority => match key.code {
                     KeyCode::Char(' ') | KeyCode::Right => {
                         state.priority = state.priority.next();
@@ -893,11 +936,27 @@ mod tests {
             app.handle_key_event(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
         }
 
+        // Tab to Frequency (default Mon -> Right to Tue; due_weekday should sync to Tue)
+        app.handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        app.handle_key_event(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+
+        // Tab to DueWeekday (currently Tue -> Right 3 times to Fri)
+        app.handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        for _ in 0..3 {
+            app.handle_key_event(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+        }
+
         // Save with Enter
         app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         assert_eq!(app.mode, AppMode::Normal);
-        assert_eq!(app.current_routines().len(), 1);
-        assert_eq!(app.current_routines()[0].title, "Weekly Review");
+        let routines = app.current_routines();
+        assert_eq!(routines.len(), 1);
+        assert_eq!(routines[0].title, "Weekly Review");
+        assert_eq!(
+            routines[0].frequency,
+            RoutineFrequency::Weekly(chrono::Weekday::Tue)
+        );
+        assert_eq!(routines[0].due_weekday, Some(chrono::Weekday::Fri));
 
         // Generate instance manually with 'p'
         app.handle_key_event(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE));

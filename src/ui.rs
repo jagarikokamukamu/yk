@@ -14,7 +14,7 @@ use crate::app::{
     App, AppMode, EditField, EditRoutineField, EditRoutineState, EditState, ViewList,
     ViewRoutineState, ViewTaskState,
 };
-use crate::model::{Priority, Routine, Task, TaskStatus};
+use crate::model::{due_weekday_label, Priority, Routine, RoutineFrequency, Task, TaskStatus};
 use crate::theme::*;
 
 pub fn draw(f: &mut Frame, app: &mut App) {
@@ -233,10 +233,10 @@ fn draw_routine_list(f: &mut Frame, app: &mut App, area: Rect) {
                     Span::raw("  ")
                 };
 
-                // 2. Frequency badge
-                let freq_label = routine.frequency.display_label();
+                // 2. Schedule badge (spawn frequency + due weekday)
+                let sched_label = routine.schedule_label();
                 let freq_span = Span::styled(
-                    format!("[ {:<12} ] ", freq_label),
+                    format!("[ {} ] ", sched_label),
                     Style::default()
                         .fg(COLOR_GOLD_YELLOW)
                         .add_modifier(Modifier::BOLD),
@@ -613,7 +613,7 @@ fn draw_edit_modal(f: &mut Frame, state: &EditState) {
 }
 
 fn draw_edit_routine_modal(f: &mut Frame, state: &EditRoutineState) {
-    let area = centered_rect(75, 65, f.area());
+    let area = centered_rect(75, 75, f.area());
     f.render_widget(Clear, area);
 
     let modal_title = if state.target_routine_id.is_some() {
@@ -635,7 +635,8 @@ fn draw_edit_routine_modal(f: &mut Frame, state: &EditRoutineState) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3), // Title
-            Constraint::Length(3), // Frequency
+            Constraint::Length(3), // Frequency (Spawn)
+            Constraint::Length(3), // Due Weekday
             Constraint::Length(3), // Priority
             Constraint::Min(4),    // Description
             Constraint::Length(2), // Help / Instructions
@@ -667,7 +668,7 @@ fn draw_edit_routine_modal(f: &mut Frame, state: &EditRoutineState) {
     );
     f.render_widget(title_widget, chunks[0]);
 
-    // 2. Frequency
+    // 2. Frequency (Spawn Day)
     let freq_border = if state.active_field == EditRoutineField::Frequency {
         COLOR_CYAN
     } else {
@@ -688,12 +689,45 @@ fn draw_edit_routine_modal(f: &mut Frame, state: &EditRoutineState) {
     .block(
         Block::default()
             .borders(Borders::ALL)
-            .title(" 頻度 (Frequency) ")
+            .title(" 追加する曜日・頻度 (Spawn Frequency) ")
             .border_style(Style::default().fg(freq_border)),
     );
     f.render_widget(freq_widget, chunks[1]);
 
-    // 3. Priority
+    // 3. Due Weekday
+    let due_border = if state.active_field == EditRoutineField::DueWeekday {
+        COLOR_CYAN
+    } else {
+        COLOR_BORDER
+    };
+    let due_line = match state.frequency {
+        RoutineFrequency::Daily => Line::from(vec![
+            Span::styled("当日 (Today)", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled(
+                "  (毎日のため当日が期日になります)",
+                Style::default().fg(COLOR_TEXT_MUTED),
+            ),
+        ]),
+        RoutineFrequency::Weekly(_) => Line::from(vec![
+            Span::styled(
+                due_weekday_label(state.due_weekday),
+                Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "  (Space / ← / → で変更・追加日以降の曜日が期日になります)",
+                Style::default().fg(COLOR_TEXT_MUTED),
+            ),
+        ]),
+    };
+    let due_widget = Paragraph::new(due_line).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" 期日の曜日 (Due Weekday) ")
+            .border_style(Style::default().fg(due_border)),
+    );
+    f.render_widget(due_widget, chunks[2]);
+
+    // 4. Priority
     let priority_border = if state.active_field == EditRoutineField::Priority {
         COLOR_CYAN
     } else {
@@ -722,9 +756,9 @@ fn draw_edit_routine_modal(f: &mut Frame, state: &EditRoutineState) {
             .title(" 優先度 (Priority) ")
             .border_style(Style::default().fg(priority_border)),
     );
-    f.render_widget(priority_widget, chunks[2]);
+    f.render_widget(priority_widget, chunks[3]);
 
-    // 4. Description
+    // 5. Description
     let desc_border = if state.active_field == EditRoutineField::Description {
         COLOR_CYAN
     } else {
@@ -750,7 +784,7 @@ fn draw_edit_routine_modal(f: &mut Frame, state: &EditRoutineState) {
             .title(" 説明 (Description - Enterで改行) ")
             .border_style(Style::default().fg(desc_border)),
     );
-    f.render_widget(desc_widget, chunks[3]);
+    f.render_widget(desc_widget, chunks[4]);
 
     // Instructions
     let guide = Paragraph::new(Line::from(vec![
@@ -761,7 +795,7 @@ fn draw_edit_routine_modal(f: &mut Frame, state: &EditRoutineState) {
         Span::styled("[Esc] ", Style::default().fg(COLOR_CYAN)),
         Span::styled("キャンセル", Style::default().fg(COLOR_TEXT_MUTED)),
     ]));
-    f.render_widget(guide, chunks[4]);
+    f.render_widget(guide, chunks[5]);
 }
 
 fn draw_view_modal(f: &mut Frame, state: &ViewTaskState) {
@@ -937,9 +971,9 @@ fn draw_view_routine_modal(f: &mut Frame, state: &ViewRoutineState) {
             ),
         ]),
         Line::from(vec![
-            Span::styled("頻度: ", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled("スケジュール: ", Style::default().fg(COLOR_TEXT_MUTED)),
             Span::styled(
-                routine.frequency.display_label(),
+                routine.schedule_label(),
                 Style::default()
                     .fg(COLOR_GOLD_YELLOW)
                     .add_modifier(Modifier::BOLD),
