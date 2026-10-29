@@ -1,5 +1,6 @@
 use chrono::{Local, NaiveDate};
 use clap::{Parser, Subcommand};
+use std::io::{self, Write};
 
 use crate::config::Config;
 use crate::db::Db;
@@ -60,6 +61,16 @@ pub enum Commands {
         #[arg(required = true)]
         ids: Vec<i64>,
     },
+    /// タスクを削除する
+    #[command(alias = "delete", alias = "del")]
+    Rm {
+        /// 削除するタスクID（複数指定可）
+        #[arg(required = true)]
+        ids: Vec<i64>,
+        /// 確認プロンプトを表示せずに即時削除する
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
 }
 
 pub fn handle_cli(cli: Cli, db: &Db, config: &Config) -> Result<(), Box<dyn std::error::Error>> {
@@ -113,7 +124,9 @@ pub fn handle_cli(cli: Cli, db: &Db, config: &Config) -> Result<(), Box<dyn std:
                 if archive {
                     println!("アーカイブされたタスクはありません。");
                 } else {
-                    println!("表示対象のタスクはありません。'yk add \"タスク名\"' で追加できます。");
+                    println!(
+                        "表示対象のタスクはありません。'yk add \"タスク名\"' で追加できます。"
+                    );
                 }
                 return Ok(());
             }
@@ -162,6 +175,30 @@ pub fn handle_cli(cli: Cli, db: &Db, config: &Config) -> Result<(), Box<dyn std:
                 }
             }
         }
+        Commands::Rm { ids, force } => {
+            for id in ids {
+                match db.get_task_by_id(id)? {
+                    Some(task) => {
+                        if !force {
+                            print!("タスク #{} '{}' を削除しますか？ [y/N]: ", id, task.title);
+                            io::stdout().flush()?;
+                            let mut answer = String::new();
+                            io::stdin().read_line(&mut answer)?;
+                            let trimmed = answer.trim();
+                            if trimmed != "y" && trimmed != "Y" {
+                                println!("削除をキャンセルしました。");
+                                continue;
+                            }
+                        }
+                        db.delete_task(id)?;
+                        println!("タスク #{} を削除しました: {}", id, task.title);
+                    }
+                    None => {
+                        eprintln!("エラー: タスク #{} は存在しません。", id);
+                    }
+                }
+            }
+        }
     }
 
     Ok(())
@@ -172,12 +209,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_cli_parse_done() {
-        let cli = Cli::try_parse_from(["yk", "done", "1", "2"]).unwrap();
+    fn test_cli_parse_rm() {
+        let cli = Cli::try_parse_from(["yk", "rm", "3", "-f"]).unwrap();
         assert_eq!(
             cli.command,
-            Some(Commands::Done { ids: vec![1, 2] })
+            Some(Commands::Rm {
+                ids: vec![3],
+                force: true,
+            })
         );
+    }
+
+    #[test]
+    fn test_cli_parse_done() {
+        let cli = Cli::try_parse_from(["yk", "done", "1", "2"]).unwrap();
+        assert_eq!(cli.command, Some(Commands::Done { ids: vec![1, 2] }));
     }
 
     #[test]
