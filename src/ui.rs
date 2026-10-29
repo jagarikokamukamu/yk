@@ -10,8 +10,11 @@ use ratatui::{
     Frame,
 };
 
-use crate::app::{App, AppMode, EditField, EditState, ViewList, ViewTaskState};
-use crate::model::{Priority, Task, TaskStatus};
+use crate::app::{
+    App, AppMode, EditField, EditRoutineField, EditRoutineState, EditState, ViewList,
+    ViewRoutineState, ViewTaskState,
+};
+use crate::model::{due_weekday_label, Priority, Routine, RoutineFrequency, Task, TaskStatus};
 use crate::theme::*;
 
 pub fn draw(f: &mut Frame, app: &mut App) {
@@ -19,7 +22,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3), // Header
-            Constraint::Min(5),    // Task List
+            Constraint::Min(5),    // Main List
             Constraint::Length(3), // Footer / Key hints
         ])
         .split(f.area());
@@ -34,6 +37,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         AppMode::EditTask(edit_state) => draw_edit_modal(f, edit_state),
         AppMode::ViewTask(view_state) => draw_view_modal(f, view_state),
         AppMode::DeleteConfirm(task) => draw_delete_confirm_modal(f, task),
+        AppMode::EditRoutine(edit_state) => draw_edit_routine_modal(f, edit_state),
+        AppMode::ViewRoutine(view_state) => draw_view_routine_modal(f, view_state),
+        AppMode::DeleteRoutineConfirm(routine) => draw_delete_routine_confirm_modal(f, routine),
         AppMode::Help => draw_help_modal(f),
     }
 }
@@ -42,16 +48,22 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
     let mode_str = match app.view_list {
         ViewList::Active => " ACTIVE ",
         ViewList::Archive => " ARCHIVE ",
+        ViewList::Routine => " ROUTINE ",
     };
     let mode_style = match app.view_list {
         ViewList::Active => Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD),
         ViewList::Archive => Style::default()
             .fg(COLOR_SLATE_PURPLE)
             .add_modifier(Modifier::BOLD),
+        ViewList::Routine => Style::default()
+            .fg(COLOR_GOLD_YELLOW)
+            .add_modifier(Modifier::BOLD),
     };
 
-    let tasks = app.current_tasks();
-    let count_info = format!(" ({} tasks)", tasks.len());
+    let count_info = match app.view_list {
+        ViewList::Routine => format!(" ({} routines)", app.current_routines().len()),
+        _ => format!(" ({} tasks)", app.current_tasks().len()),
+    };
 
     let header_line = Line::from(vec![
         Span::styled(
@@ -78,6 +90,14 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_list(f: &mut Frame, app: &mut App, area: Rect) {
+    if app.view_list == ViewList::Routine {
+        draw_routine_list(f, app, area);
+    } else {
+        draw_task_list(f, app, area);
+    }
+}
+
+fn draw_task_list(f: &mut Frame, app: &mut App, area: Rect) {
     let tasks = app.current_tasks();
     let today = Local::now().date_naive();
 
@@ -85,6 +105,7 @@ fn draw_list(f: &mut Frame, app: &mut App, area: Rect) {
         let empty_msg = match app.view_list {
             ViewList::Active => "タスクがありません。'a'キーで新規追加してください。",
             ViewList::Archive => "アーカイブされたタスクはありません。",
+            ViewList::Routine => "",
         };
         vec![ListItem::new(Line::from(vec![Span::styled(
             format!("  {}", empty_msg),
@@ -97,7 +118,7 @@ fn draw_list(f: &mut Frame, app: &mut App, area: Rect) {
             .map(|(i, task)| {
                 let is_selected = i == app.selected_index;
 
-                // 1. Cursor indicator: Leftmost '▶ ' without row reversal
+                // 1. Cursor indicator
                 let cursor_span = if is_selected {
                     Span::styled(
                         "▶ ",
@@ -107,7 +128,7 @@ fn draw_list(f: &mut Frame, app: &mut App, area: Rect) {
                     Span::raw("  ")
                 };
 
-                // 2. Checkbox: brackets in border color, inner char colored
+                // 2. Checkbox
                 let bracket_open = Span::styled("[", Style::default().fg(COLOR_BORDER));
                 let indicator_span = Span::styled(
                     task.status.indicator(),
@@ -125,7 +146,7 @@ fn draw_list(f: &mut Frame, app: &mut App, area: Rect) {
                         .add_modifier(Modifier::BOLD),
                 );
 
-                // 4. Title: Bold when selected, strike-through when completed
+                // 4. Title
                 let title_style = if task.status == TaskStatus::Done {
                     Style::default()
                         .fg(COLOR_TEXT_MUTED)
@@ -159,6 +180,7 @@ fn draw_list(f: &mut Frame, app: &mut App, area: Rect) {
     let title_text = match app.view_list {
         ViewList::Active => " Active Tasks ",
         ViewList::Archive => " Archived Tasks ",
+        ViewList::Routine => " Routine Templates ",
     };
 
     let list_widget = List::new(items).block(
@@ -186,34 +208,153 @@ fn draw_list(f: &mut Frame, app: &mut App, area: Rect) {
     }
 }
 
-fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
-    let help_line = Line::from(vec![
-        Span::styled(" [a] ", Style::default().fg(COLOR_CYAN)),
-        Span::styled("Add  ", Style::default().fg(COLOR_TEXT_MUTED)),
-        Span::styled("[Space] ", Style::default().fg(COLOR_CYAN)),
-        Span::styled("Done  ", Style::default().fg(COLOR_TEXT_MUTED)),
-        Span::styled("[i/I] ", Style::default().fg(COLOR_CYAN)),
-        Span::styled("InProg  ", Style::default().fg(COLOR_TEXT_MUTED)),
-        Span::styled("[e] ", Style::default().fg(COLOR_CYAN)),
-        Span::styled("Edit  ", Style::default().fg(COLOR_TEXT_MUTED)),
-        Span::styled("[v] ", Style::default().fg(COLOR_CYAN)),
-        Span::styled("View  ", Style::default().fg(COLOR_TEXT_MUTED)),
-        Span::styled("[d] ", Style::default().fg(COLOR_CYAN)),
-        Span::styled("Del  ", Style::default().fg(COLOR_TEXT_MUTED)),
-        Span::styled("[A] ", Style::default().fg(COLOR_CYAN)),
-        Span::styled(
-            if app.view_list == ViewList::Active {
-                "Archive  "
-            } else {
-                "Active  "
-            },
+fn draw_routine_list(f: &mut Frame, app: &mut App, area: Rect) {
+    let routines = app.current_routines();
+
+    let items: Vec<ListItem> = if routines.is_empty() {
+        vec![ListItem::new(Line::from(vec![Span::styled(
+            "  定期タスクがありません。'a'キーで新規登録してください。",
             Style::default().fg(COLOR_TEXT_MUTED),
-        ),
-        Span::styled("[?] ", Style::default().fg(COLOR_CYAN)),
-        Span::styled("Help  ", Style::default().fg(COLOR_TEXT_MUTED)),
-        Span::styled("[q] ", Style::default().fg(COLOR_CYAN)),
-        Span::styled("Quit", Style::default().fg(COLOR_TEXT_MUTED)),
-    ]);
+        )]))]
+    } else {
+        routines
+            .iter()
+            .enumerate()
+            .map(|(i, routine)| {
+                let is_selected = i == app.selected_index;
+
+                // 1. Cursor
+                let cursor_span = if is_selected {
+                    Span::styled(
+                        "▶ ",
+                        Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD),
+                    )
+                } else {
+                    Span::raw("  ")
+                };
+
+                // 2. Schedule badge (spawn frequency + due weekday)
+                let sched_label = routine.schedule_label();
+                let freq_span = Span::styled(
+                    format!("[ {} ] ", sched_label),
+                    Style::default()
+                        .fg(COLOR_GOLD_YELLOW)
+                        .add_modifier(Modifier::BOLD),
+                );
+
+                // 3. Priority indicator
+                let priority_span = Span::styled(
+                    format!("{:<3} ", routine.priority.indicator()),
+                    Style::default()
+                        .fg(priority_color(routine.priority))
+                        .add_modifier(Modifier::BOLD),
+                );
+
+                // 4. Title
+                let title_style = if is_selected {
+                    Style::default()
+                        .fg(COLOR_TEXT_TITLE)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(COLOR_TEXT_BODY)
+                };
+                let title_span = Span::styled(&routine.title, title_style);
+
+                // 5. Last generated info
+                let last_gen_str = match routine.last_generated_date {
+                    Some(d) => format!("  (最終発行: {})", d.format("%Y-%m-%d")),
+                    None => "  (未発行)".to_string(),
+                };
+                let last_gen_span =
+                    Span::styled(last_gen_str, Style::default().fg(COLOR_TEXT_MUTED));
+
+                ListItem::new(Line::from(vec![
+                    cursor_span,
+                    freq_span,
+                    priority_span,
+                    title_span,
+                    last_gen_span,
+                ]))
+            })
+            .collect()
+    };
+
+    let list_widget = List::new(items).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Routine Templates (毎週・毎日の定期タスク雛形) ")
+            .title_style(Style::default().fg(COLOR_TEXT_TITLE))
+            .border_style(Style::default().fg(COLOR_BORDER)),
+    );
+
+    f.render_stateful_widget(list_widget, area, &mut app.list_state);
+
+    let inner_height = area.height.saturating_sub(2) as usize;
+    if routines.len() > inner_height && inner_height > 0 {
+        let mut scrollbar_state = ScrollbarState::new(routines.len().saturating_sub(inner_height))
+            .position(app.list_state.offset());
+        let scrollbar = Scrollbar::default()
+            .orientation(ScrollbarOrientation::VerticalRight)
+            .begin_symbol(Some("▲"))
+            .end_symbol(Some("▼"))
+            .track_symbol(Some("│"))
+            .thumb_symbol("█")
+            .style(Style::default().fg(COLOR_CYAN));
+        f.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
+    }
+}
+
+fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
+    let help_line = if app.view_list == ViewList::Routine {
+        Line::from(vec![
+            Span::styled(" [a] ", Style::default().fg(COLOR_CYAN)),
+            Span::styled("Add  ", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled("[e] ", Style::default().fg(COLOR_CYAN)),
+            Span::styled("Edit  ", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled("[v] ", Style::default().fg(COLOR_CYAN)),
+            Span::styled("View  ", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled("[d] ", Style::default().fg(COLOR_CYAN)),
+            Span::styled("Delete  ", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled("[p/Space] ", Style::default().fg(COLOR_CYAN)),
+            Span::styled("今すぐ発行  ", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled("[R/Tab] ", Style::default().fg(COLOR_CYAN)),
+            Span::styled("Activeへ  ", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled("[?] ", Style::default().fg(COLOR_CYAN)),
+            Span::styled("Help  ", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled("[q] ", Style::default().fg(COLOR_CYAN)),
+            Span::styled("Quit", Style::default().fg(COLOR_TEXT_MUTED)),
+        ])
+    } else {
+        Line::from(vec![
+            Span::styled(" [a] ", Style::default().fg(COLOR_CYAN)),
+            Span::styled("Add  ", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled("[Space] ", Style::default().fg(COLOR_CYAN)),
+            Span::styled("Done  ", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled("[i/I] ", Style::default().fg(COLOR_CYAN)),
+            Span::styled("InProg  ", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled("[e] ", Style::default().fg(COLOR_CYAN)),
+            Span::styled("Edit  ", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled("[v] ", Style::default().fg(COLOR_CYAN)),
+            Span::styled("View  ", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled("[d] ", Style::default().fg(COLOR_CYAN)),
+            Span::styled("Del  ", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled("[A] ", Style::default().fg(COLOR_CYAN)),
+            Span::styled(
+                if app.view_list == ViewList::Active {
+                    "Archive  "
+                } else {
+                    "Active  "
+                },
+                Style::default().fg(COLOR_TEXT_MUTED),
+            ),
+            Span::styled("[R] ", Style::default().fg(COLOR_CYAN)),
+            Span::styled("Routine  ", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled("[?] ", Style::default().fg(COLOR_CYAN)),
+            Span::styled("Help  ", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled("[q] ", Style::default().fg(COLOR_CYAN)),
+            Span::styled("Quit", Style::default().fg(COLOR_TEXT_MUTED)),
+        ])
+    };
 
     let block = Block::default()
         .borders(Borders::ALL)
@@ -290,7 +431,7 @@ fn draw_edit_modal(f: &mut Frame, state: &EditState) {
         ])
         .split(inner);
 
-    // 1. Title
+    // Title
     let title_border = if state.active_field == EditField::Title {
         COLOR_CYAN
     } else {
@@ -315,7 +456,7 @@ fn draw_edit_modal(f: &mut Frame, state: &EditState) {
     );
     f.render_widget(title_widget, chunks[0]);
 
-    // 2. Description
+    // Description
     let desc_border = if state.active_field == EditField::Description {
         COLOR_CYAN
     } else {
@@ -343,7 +484,7 @@ fn draw_edit_modal(f: &mut Frame, state: &EditState) {
     );
     f.render_widget(desc_widget, chunks[1]);
 
-    // 3. Status
+    // Status
     let status_border = if state.active_field == EditField::Status {
         COLOR_CYAN
     } else {
@@ -374,7 +515,7 @@ fn draw_edit_modal(f: &mut Frame, state: &EditState) {
     );
     f.render_widget(status_widget, chunks[2]);
 
-    // 4. Priority
+    // Priority
     let priority_border = if state.active_field == EditField::Priority {
         COLOR_CYAN
     } else {
@@ -405,7 +546,7 @@ fn draw_edit_modal(f: &mut Frame, state: &EditState) {
     );
     f.render_widget(priority_widget, chunks[3]);
 
-    // 5. Due Date
+    // Due Date
     let due_border = if state.active_field == EditField::DueDate {
         COLOR_CYAN
     } else {
@@ -458,6 +599,192 @@ fn draw_edit_modal(f: &mut Frame, state: &EditState) {
             .border_style(Style::default().fg(due_border)),
     );
     f.render_widget(due_widget, chunks[4]);
+
+    // Instructions
+    let guide = Paragraph::new(Line::from(vec![
+        Span::styled("[Tab/Shift+Tab] ", Style::default().fg(COLOR_CYAN)),
+        Span::styled("移動  ", Style::default().fg(COLOR_TEXT_MUTED)),
+        Span::styled("[Ctrl+Enter] ", Style::default().fg(COLOR_CYAN)),
+        Span::styled("保存  ", Style::default().fg(COLOR_TEXT_MUTED)),
+        Span::styled("[Esc] ", Style::default().fg(COLOR_CYAN)),
+        Span::styled("キャンセル", Style::default().fg(COLOR_TEXT_MUTED)),
+    ]));
+    f.render_widget(guide, chunks[5]);
+}
+
+fn draw_edit_routine_modal(f: &mut Frame, state: &EditRoutineState) {
+    let area = centered_rect(75, 75, f.area());
+    f.render_widget(Clear, area);
+
+    let modal_title = if state.target_routine_id.is_some() {
+        " 定期タスク編集 "
+    } else {
+        " 新規定期タスク登録 "
+    };
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(modal_title)
+        .title_style(Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD))
+        .border_style(Style::default().fg(COLOR_CYAN));
+
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3), // Title
+            Constraint::Length(3), // Frequency (Spawn)
+            Constraint::Length(3), // Due Weekday
+            Constraint::Length(3), // Priority
+            Constraint::Min(4),    // Description
+            Constraint::Length(2), // Help / Instructions
+        ])
+        .split(inner);
+
+    // 1. Title
+    let title_border = if state.active_field == EditRoutineField::Title {
+        COLOR_CYAN
+    } else {
+        COLOR_BORDER
+    };
+    let title_content = if state.active_field == EditRoutineField::Title {
+        Line::from(vec![
+            Span::styled(&state.title, Style::default().fg(COLOR_TEXT_TITLE)),
+            Span::styled("█", Style::default().fg(COLOR_CYAN)),
+        ])
+    } else {
+        Line::from(vec![Span::styled(
+            &state.title,
+            Style::default().fg(COLOR_TEXT_TITLE),
+        )])
+    };
+    let title_widget = Paragraph::new(title_content).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" タイトル (Title) ")
+            .border_style(Style::default().fg(title_border)),
+    );
+    f.render_widget(title_widget, chunks[0]);
+
+    // 2. Frequency (Spawn Day)
+    let freq_border = if state.active_field == EditRoutineField::Frequency {
+        COLOR_CYAN
+    } else {
+        COLOR_BORDER
+    };
+    let freq_widget = Paragraph::new(Line::from(vec![
+        Span::styled(
+            state.frequency.display_label(),
+            Style::default()
+                .fg(COLOR_GOLD_YELLOW)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            "  (Space / ← / → で変更)",
+            Style::default().fg(COLOR_TEXT_MUTED),
+        ),
+    ]))
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" 追加する曜日・頻度 (Spawn Frequency) ")
+            .border_style(Style::default().fg(freq_border)),
+    );
+    f.render_widget(freq_widget, chunks[1]);
+
+    // 3. Due Weekday
+    let due_border = if state.active_field == EditRoutineField::DueWeekday {
+        COLOR_CYAN
+    } else {
+        COLOR_BORDER
+    };
+    let due_line = match state.frequency {
+        RoutineFrequency::Daily => Line::from(vec![
+            Span::styled("当日 (Today)", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled(
+                "  (毎日のため当日が期日になります)",
+                Style::default().fg(COLOR_TEXT_MUTED),
+            ),
+        ]),
+        RoutineFrequency::Weekly(_) => Line::from(vec![
+            Span::styled(
+                due_weekday_label(state.due_weekday),
+                Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "  (Space / ← / → で変更・追加日以降の曜日が期日になります)",
+                Style::default().fg(COLOR_TEXT_MUTED),
+            ),
+        ]),
+    };
+    let due_widget = Paragraph::new(due_line).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" 期日の曜日 (Due Weekday) ")
+            .border_style(Style::default().fg(due_border)),
+    );
+    f.render_widget(due_widget, chunks[2]);
+
+    // 4. Priority
+    let priority_border = if state.active_field == EditRoutineField::Priority {
+        COLOR_CYAN
+    } else {
+        COLOR_BORDER
+    };
+    let priority_str = match state.priority {
+        Priority::Low => "! 低 (Low)",
+        Priority::Medium => "!! 中 (Medium)",
+        Priority::High => "!!! 高 (High)",
+    };
+    let priority_widget = Paragraph::new(Line::from(vec![
+        Span::styled(
+            priority_str,
+            Style::default()
+                .fg(priority_color(state.priority))
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            "  (Space / ← / → で変更)",
+            Style::default().fg(COLOR_TEXT_MUTED),
+        ),
+    ]))
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" 優先度 (Priority) ")
+            .border_style(Style::default().fg(priority_border)),
+    );
+    f.render_widget(priority_widget, chunks[3]);
+
+    // 5. Description
+    let desc_border = if state.active_field == EditRoutineField::Description {
+        COLOR_CYAN
+    } else {
+        COLOR_BORDER
+    };
+    let mut desc_lines: Vec<Line> = state
+        .description
+        .lines()
+        .map(|l| Line::from(Span::styled(l, Style::default().fg(COLOR_TEXT_BODY))))
+        .collect();
+    if desc_lines.is_empty() {
+        desc_lines.push(Line::from(vec![]));
+    }
+    if state.active_field == EditRoutineField::Description {
+        let last_idx = desc_lines.len() - 1;
+        let mut spans = desc_lines[last_idx].spans.clone();
+        spans.push(Span::styled("█", Style::default().fg(COLOR_CYAN)));
+        desc_lines[last_idx] = Line::from(spans);
+    }
+    let desc_widget = Paragraph::new(desc_lines).wrap(Wrap { trim: false }).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" 説明 (Description - Enterで改行) ")
+            .border_style(Style::default().fg(desc_border)),
+    );
+    f.render_widget(desc_widget, chunks[4]);
 
     // Instructions
     let guide = Paragraph::new(Line::from(vec![
@@ -546,6 +873,16 @@ fn draw_view_modal(f: &mut Frame, state: &ViewTaskState) {
         ]));
     }
 
+    if let Some(r_id) = task.routine_id {
+        lines.push(Line::from(vec![
+            Span::styled("定期タスク元: ", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled(
+                format!("Routine #{}", r_id),
+                Style::default().fg(COLOR_GOLD_YELLOW),
+            ),
+        ]));
+    }
+
     lines.push(Line::from(""));
     lines.push(Line::from(vec![Span::styled(
         "--- 説明 ---",
@@ -559,6 +896,126 @@ fn draw_view_modal(f: &mut Frame, state: &ViewTaskState) {
         )]));
     } else {
         for l in task.description.lines() {
+            lines.push(Line::from(vec![Span::styled(
+                l,
+                Style::default().fg(COLOR_TEXT_BODY),
+            )]));
+        }
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![
+        Span::styled("[j/k または ↓/↑] ", Style::default().fg(COLOR_CYAN)),
+        Span::styled("スクロール  ", Style::default().fg(COLOR_TEXT_MUTED)),
+        Span::styled("[Esc / q / Enter] ", Style::default().fg(COLOR_CYAN)),
+        Span::styled("閉じる", Style::default().fg(COLOR_TEXT_MUTED)),
+    ]));
+
+    let total_lines = lines.len();
+    let content = Paragraph::new(lines)
+        .wrap(Wrap { trim: false })
+        .scroll((state.scroll_offset, 0));
+    f.render_widget(content, inner);
+
+    let inner_height = inner.height as usize;
+    if total_lines > inner_height && inner_height > 0 {
+        let max_scroll = (total_lines.saturating_sub(inner_height)) as u16;
+        let effective_scroll = state.scroll_offset.min(max_scroll);
+        let mut scrollbar_state = ScrollbarState::new(total_lines.saturating_sub(inner_height))
+            .position(effective_scroll as usize);
+        let scrollbar = Scrollbar::default()
+            .orientation(ScrollbarOrientation::VerticalRight)
+            .begin_symbol(Some("▲"))
+            .end_symbol(Some("▼"))
+            .track_symbol(Some("│"))
+            .thumb_symbol("█")
+            .style(Style::default().fg(COLOR_CYAN));
+        f.render_stateful_widget(scrollbar, inner, &mut scrollbar_state);
+    }
+}
+
+fn draw_view_routine_modal(f: &mut Frame, state: &ViewRoutineState) {
+    let routine = &state.routine;
+    let area = centered_rect(70, 60, f.area());
+    f.render_widget(Clear, area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" 定期タスク詳細閲覧 ")
+        .title_style(Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD))
+        .border_style(Style::default().fg(COLOR_CYAN));
+
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let last_gen_str = match routine.last_generated_date {
+        Some(d) => d.format("%Y-%m-%d").to_string(),
+        None => "未発行".to_string(),
+    };
+
+    let mut lines = vec![
+        Line::from(vec![
+            Span::styled("ID: ", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled(
+                routine.id.to_string(),
+                Style::default().fg(COLOR_TEXT_TITLE),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("タイトル: ", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled(
+                &routine.title,
+                Style::default()
+                    .fg(COLOR_TEXT_TITLE)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("スケジュール: ", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled(
+                routine.schedule_label(),
+                Style::default()
+                    .fg(COLOR_GOLD_YELLOW)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("優先度: ", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled(
+                format!(
+                    "{} ({})",
+                    routine.priority.indicator(),
+                    routine.priority.as_str()
+                ),
+                Style::default().fg(priority_color(routine.priority)),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("最終発行日: ", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled(last_gen_str, Style::default().fg(COLOR_TEXT_BODY)),
+        ]),
+        Line::from(vec![
+            Span::styled("作成日時: ", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled(
+                routine.created_at.format("%Y-%m-%d %H:%M:%S").to_string(),
+                Style::default().fg(COLOR_TEXT_BODY),
+            ),
+        ]),
+    ];
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![Span::styled(
+        "--- 説明 ---",
+        Style::default().fg(COLOR_BORDER),
+    )]));
+
+    if routine.description.trim().is_empty() {
+        lines.push(Line::from(vec![Span::styled(
+            "(説明はありません)",
+            Style::default().fg(COLOR_TEXT_MUTED),
+        )]));
+    } else {
+        for l in routine.description.lines() {
             lines.push(Line::from(vec![Span::styled(
                 l,
                 Style::default().fg(COLOR_TEXT_BODY),
@@ -647,8 +1104,58 @@ fn draw_delete_confirm_modal(f: &mut Frame, task: &Task) {
     f.render_widget(content, inner);
 }
 
+fn draw_delete_routine_confirm_modal(f: &mut Frame, routine: &Routine) {
+    let area = centered_rect(55, 25, f.area());
+    f.render_widget(Clear, area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" 定期タスク削除確認 ")
+        .title_style(
+            Style::default()
+                .fg(COLOR_CRIMSON_RED)
+                .add_modifier(Modifier::BOLD),
+        )
+        .border_style(Style::default().fg(COLOR_CRIMSON_RED));
+
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let lines = vec![
+        Line::from(Span::styled(
+            "以下の定期タスク（雛形）を削除しますか？",
+            Style::default().fg(COLOR_TEXT_TITLE),
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("タイトル: ", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled(
+                &routine.title,
+                Style::default()
+                    .fg(COLOR_CRIMSON_RED)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled(
+                "[y] ",
+                Style::default()
+                    .fg(COLOR_CRIMSON_RED)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("削除する   ", Style::default().fg(COLOR_TEXT_TITLE)),
+            Span::styled("[n / Esc] ", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled("キャンセル", Style::default().fg(COLOR_TEXT_MUTED)),
+        ]),
+    ];
+
+    let content = Paragraph::new(lines).alignment(Alignment::Center);
+    f.render_widget(content, inner);
+}
+
 fn draw_help_modal(f: &mut Frame) {
-    let area = centered_rect(65, 75, f.area());
+    let area = centered_rect(65, 80, f.area());
     f.render_widget(Clear, area);
 
     let block = Block::default()
@@ -661,7 +1168,7 @@ fn draw_help_modal(f: &mut Frame) {
     f.render_widget(block, area);
 
     let shortcuts = vec![
-        ("メイン一覧", ""),
+        ("メイン一覧 (Active / Archive)", ""),
         ("  j / ↓, k / ↑", "リストの循環移動"),
         ("  Space", "完了トグル (Todo ↔ Done, completed_at自動付与)"),
         (
@@ -673,14 +1180,24 @@ fn draw_help_modal(f: &mut Frame) {
         ("  e / Enter", "詳細編集モーダル"),
         ("  v", "詳細閲覧モーダル"),
         ("  d", "削除確認モーダル (y/n)"),
-        ("  A", "アクティブ一覧 ↔ アーカイブ一覧の切り替え"),
+        ("  Tab", "Active → Archive → Routine のビュー巡回"),
+        ("  A", "Active ↔ Archive 表示切り替え"),
+        ("  R", "Active ↔ Routine 表示切り替え"),
         ("  ?", "ヘルプモーダル表示"),
         ("  q / Esc", "アプリケーション終了"),
+        ("", ""),
+        ("定期タスク画面 (Routine)", ""),
+        ("  a", "新規定期タスク登録モーダル"),
+        ("  e / Enter", "定期タスク編集モーダル"),
+        ("  d", "定期タスク削除確認モーダル (y/n)"),
+        ("  v", "定期タスク詳細閲覧"),
+        ("  p / Space", "今すぐ実体タスクをActiveに発行"),
+        ("  R / Esc", "Active画面へ戻る"),
         ("", ""),
         ("編集モーダル", ""),
         ("  Tab / Shift+Tab", "項目間移動 (次 / 前)"),
         ("  ↓ / ↑", "項目間移動 (説明欄以外)"),
-        ("  Space, ← / →", "ステータス・優先度の順送り・逆送り"),
+        ("  Space, ← / →", "ステータス・頻度・優先度の変更"),
         ("  ← / → (期日欄)", "1日加減 (テキスト直接入力も可能)"),
         ("  Enter (説明欄)", "改行入力"),
         (
@@ -688,10 +1205,6 @@ fn draw_help_modal(f: &mut Frame) {
             "保存して閉じる (タイトル等ではEnterでも保存可)",
         ),
         ("  Esc", "キャンセルして閉じる"),
-        ("", ""),
-        ("詳細閲覧モーダル", ""),
-        ("  j / ↓, k / ↑", "長文説明文の上下スクロール"),
-        ("  Esc / q / Enter / v", "閉じる"),
     ];
 
     let mut lines = Vec::new();

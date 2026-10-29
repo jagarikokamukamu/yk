@@ -4,7 +4,7 @@ use std::io::{self, Write};
 
 use crate::config::Config;
 use crate::db::Db;
-use crate::model::{Priority, TaskStatus};
+use crate::model::{parse_weekday_loose, Priority, RoutineFrequency, TaskStatus};
 use crate::theme::due_date_display;
 
 #[derive(Parser, Debug, PartialEq, Eq)]
@@ -70,6 +70,53 @@ pub enum Commands {
         /// 確認プロンプトを表示せずに即時削除する
         #[arg(short = 'f', long)]
         force: bool,
+    },
+    /// 定期タスク（Routine）の管理
+    #[command(alias = "r")]
+    Routine {
+        #[command(subcommand)]
+        subcommand: RoutineCommands,
+    },
+}
+
+#[derive(Subcommand, Debug, PartialEq, Eq)]
+pub enum RoutineCommands {
+    /// 定期タスク一覧を表示
+    #[command(alias = "ls")]
+    List,
+    /// 新規定期タスクを追加
+    #[command(alias = "a")]
+    Add {
+        /// タスク名
+        title: String,
+        /// 追加する曜日・頻度 (daily, mon, tue, wed, thu, fri, sat, sun)
+        #[arg(short = 'f', long, default_value = "daily")]
+        frequency: String,
+        /// 期日の曜日 (mon, tue, wed, thu, fri, sat, sun, none / 未指定時は追加曜日と同じ)
+        #[arg(short = 'd', long)]
+        due: Option<String>,
+        /// 優先度 (low, medium, high)
+        #[arg(short = 'p', long, default_value = "medium")]
+        priority: String,
+        /// 詳細説明
+        #[arg(short = 'm', long, default_value = "")]
+        desc: String,
+    },
+    /// 定期タスクを削除する
+    #[command(alias = "delete", alias = "del")]
+    Rm {
+        /// 削除する定期タスクID（複数指定可）
+        #[arg(required = true)]
+        ids: Vec<i64>,
+        /// 確認プロンプトを表示せずに即時削除する
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
+    /// 定期タスクからActiveタスクを即時発行する
+    #[command(alias = "gen")]
+    Generate {
+        /// 特定の定期タスクID（未指定時は全定期タスクが対象）
+        id: Option<i64>,
     },
 }
 
@@ -199,6 +246,110 @@ pub fn handle_cli(cli: Cli, db: &Db, config: &Config) -> Result<(), Box<dyn std:
                 }
             }
         }
+        Commands::Routine { subcommand } => match subcommand {
+            RoutineCommands::List => {
+                let routines = db.get_all_routines()?;
+                if routines.is_empty() {
+                    println!(
+                        "登録されている定期タスクはありません。'yk routine add \"タスク名\"' で追加できます。"
+                    );
+                    return Ok(());
+                }
+
+                println!("{:<5} {:<24} {:<5} TITLE", "ID", "SCHEDULE", "PRIO");
+                println!("{}", "-".repeat(55));
+
+                for r in routines {
+                    println!(
+                        "{:<5} {:<24} {:<5} {}",
+                        r.id,
+                        r.schedule_label(),
+                        r.priority.indicator(),
+                        r.title
+                    );
+                }
+            }
+            RoutineCommands::Add {
+                title,
+                frequency,
+                due,
+                priority,
+                desc,
+            } => {
+                let freq = RoutineFrequency::from_str_loose(&frequency);
+                let due_weekday = match freq {
+                    RoutineFrequency::Daily => None,
+                    RoutineFrequency::Weekly(spawn_w) => match due {
+                        Some(ref s) => parse_weekday_loose(s),
+                        None => Some(spawn_w),
+                    },
+                };
+                let prio = Priority::from_str_loose(&priority);
+                let id = db.add_routine(&title, &desc, prio, freq, due_weekday)?;
+                if let Some(r) = db.get_routine_by_id(id)? {
+                    println!(
+                        "定期タスク #{} を作成しました [{}]: {}",
+                        id,
+                        r.schedule_label(),
+                        title
+                    );
+                }
+            }
+            RoutineCommands::Rm { ids, force } => {
+                for id in ids {
+                    match db.get_routine_by_id(id)? {
+                        Some(routine) => {
+                            if !force {
+                                print!(
+                                    "定期タスク #{} '{}' を削除しますか？ [y/N]: ",
+                                    id, routine.title
+                                );
+                                io::stdout().flush()?;
+                                let mut answer = String::new();
+                                io::stdin().read_line(&mut answer)?;
+                                let trimmed = answer.trim();
+                                if trimmed != "y" && trimmed != "Y" {
+                                    println!("削除をキャンセルしました。");
+                                    continue;
+                                }
+                            }
+                            db.delete_routine(id)?;
+                            println!("定期タスク #{} を削除しました: {}", id, routine.title);
+                        }
+                        None => {
+                            eprintln!("エラー: 定期タスク #{} は存在しません。", id);
+                        }
+                    }
+                }
+            }
+            RoutineCommands::Generate { id } => match id {
+                Some(rid) => match db.get_routine_by_id(rid)? {
+                    Some(routine) => {
+                        if let Some(task_id) = db.generate_single_routine_instance(rid)? {
+                            println!(
+                                "定期タスク #{} からタスク #{} を発行しました: {}",
+                                rid, task_id, routine.title
+                            );
+                        } else {
+                            println!(
+                                "定期タスク #{} は本日の発行条件に該当しないか、既に発行済みです。",
+                                rid
+                            );
+                        }
+                    }
+                    None => {
+                        eprintln!("エラー: 定期タスク #{} は存在しません。", rid);
+                    }
+                },
+                None => {
+                    let generated = db.generate_routine_instances()?;
+                    println!(
+                        "定期タスクから {} 件のタスクを新規発行しました。",
+                        generated.len()
+                    );
+                }
+            },
+        },
     }
 
     Ok(())
@@ -262,6 +413,68 @@ mod tests {
             Some(Commands::List {
                 all: true,
                 archive: false,
+            })
+        );
+    }
+
+    #[test]
+    fn test_cli_parse_routine_commands() {
+        // routine list
+        let cli = Cli::try_parse_from(["yk", "routine", "ls"]).unwrap();
+        assert_eq!(
+            cli.command,
+            Some(Commands::Routine {
+                subcommand: RoutineCommands::List
+            })
+        );
+
+        // routine add
+        let cli = Cli::try_parse_from([
+            "yk",
+            "r",
+            "a",
+            "Gym workout",
+            "-f",
+            "mon",
+            "-d",
+            "fri",
+            "-p",
+            "high",
+            "-m",
+            "Leg day",
+        ])
+        .unwrap();
+        assert_eq!(
+            cli.command,
+            Some(Commands::Routine {
+                subcommand: RoutineCommands::Add {
+                    title: "Gym workout".to_string(),
+                    frequency: "mon".to_string(),
+                    due: Some("fri".to_string()),
+                    priority: "high".to_string(),
+                    desc: "Leg day".to_string(),
+                }
+            })
+        );
+
+        // routine rm
+        let cli = Cli::try_parse_from(["yk", "routine", "rm", "1", "2", "-f"]).unwrap();
+        assert_eq!(
+            cli.command,
+            Some(Commands::Routine {
+                subcommand: RoutineCommands::Rm {
+                    ids: vec![1, 2],
+                    force: true,
+                }
+            })
+        );
+
+        // routine generate
+        let cli = Cli::try_parse_from(["yk", "routine", "gen", "1"]).unwrap();
+        assert_eq!(
+            cli.command,
+            Some(Commands::Routine {
+                subcommand: RoutineCommands::Generate { id: Some(1) }
             })
         );
     }
