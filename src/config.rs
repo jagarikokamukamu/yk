@@ -2,10 +2,20 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ViewStyle {
+    #[default]
+    List,
+    Kanban,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Config {
     #[serde(default = "default_archive_after_days")]
     pub archive_after_days: i64,
+    #[serde(default)]
+    pub default_view: ViewStyle,
 }
 
 fn default_archive_after_days() -> i64 {
@@ -16,6 +26,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             archive_after_days: 1,
+            default_view: ViewStyle::List,
         }
     }
 }
@@ -68,12 +79,14 @@ mod tests {
     fn test_config_default() {
         let config = Config::default();
         assert_eq!(config.archive_after_days, 1);
+        assert_eq!(config.default_view, ViewStyle::List);
     }
 
     #[test]
     fn test_config_deserialize() {
-        let toml_str = "archive_after_days = 3\n";
+        let toml_str = "archive_after_days = 3\ndefault_view = \"kanban\"\n";
         let config: Config = toml::from_str(toml_str).unwrap();
         assert_eq!(config.archive_after_days, 3);
+        assert_eq!(config.default_view, ViewStyle::Kanban);
     }
 }
