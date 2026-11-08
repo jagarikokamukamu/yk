@@ -337,7 +337,9 @@ impl App {
             if tasks.is_empty() {
                 None
             } else {
-                let idx = self.kanban_selected_index(self.kanban_col).min(tasks.len() - 1);
+                let idx = self
+                    .kanban_selected_index(self.kanban_col)
+                    .min(tasks.len() - 1);
                 Some(tasks[idx].clone())
             }
         } else {

@@ -4,8 +4,8 @@ use ratatui::{
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{
-        Block, Borders, Clear, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation,
-        ScrollbarState, Wrap,
+        Block, Borders, Clear, List, ListItem, ListState, Paragraph, Scrollbar,
+        ScrollbarOrientation, ScrollbarState, Wrap,
     },
     Frame,
 };
@@ -240,7 +240,9 @@ fn draw_narrow_warning(f: &mut Frame, area: Rect) {
             Style::default().fg(COLOR_TEXT_BODY),
         )),
     ];
-    let paragraph = Paragraph::new(msg).block(block).alignment(Alignment::Center);
+    let paragraph = Paragraph::new(msg)
+        .block(block)
+        .alignment(Alignment::Center);
     f.render_widget(paragraph, area);
 }
 
@@ -274,9 +276,7 @@ fn draw_kanban_view(f: &mut Frame, app: &mut App, area: Rect) {
         };
 
         let title_style = if is_current_col {
-            Style::default()
-                .fg(COLOR_CYAN)
-                .add_modifier(Modifier::BOLD)
+            Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(COLOR_TEXT_MUTED)
         };
@@ -356,12 +356,7 @@ fn draw_kanban_view(f: &mut Frame, app: &mut App, area: Rect) {
                         Span::raw("")
                     };
 
-                    let line2 = Line::from(vec![
-                        Span::raw("  "),
-                        prio_bar2,
-                        due_span,
-                        memo_span,
-                    ]);
+                    let line2 = Line::from(vec![Span::raw("  "), prio_bar2, due_span, memo_span]);
                     let line3 = Line::from(Span::styled("    ", Style::default().fg(COLOR_BORDER)));
 
                     ListItem::new(vec![line1, line2, line3])
@@ -563,7 +558,10 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
         ];
         if app.view_list == ViewList::Active {
             spans.push(Span::styled("[K] ", Style::default().fg(COLOR_CYAN)));
-            spans.push(Span::styled("Kanban  ", Style::default().fg(COLOR_TEXT_MUTED)));
+            spans.push(Span::styled(
+                "Kanban  ",
+                Style::default().fg(COLOR_TEXT_MUTED),
+            ));
         }
         spans.extend(vec![
             Span::styled("[A] ", Style::default().fg(COLOR_CYAN)),
