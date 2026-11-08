@@ -4,16 +4,17 @@ use ratatui::{
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{
-        Block, Borders, Clear, List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation,
-        ScrollbarState, Wrap,
+        Block, Borders, Clear, List, ListItem, ListState, Paragraph, Scrollbar,
+        ScrollbarOrientation, ScrollbarState, Wrap,
     },
     Frame,
 };
 
 use crate::app::{
-    App, AppMode, EditField, EditRoutineField, EditRoutineState, EditState, ViewList,
+    App, AppMode, EditField, EditRoutineField, EditRoutineState, EditState, KanbanColumn, ViewList,
     ViewRoutineState, ViewTaskState,
 };
+use crate::config::ViewStyle;
 use crate::model::{due_weekday_label, Priority, Routine, RoutineFrequency, Task, TaskStatus};
 use crate::theme::*;
 
@@ -46,7 +47,13 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
 fn draw_header(f: &mut Frame, app: &App, area: Rect) {
     let mode_str = match app.view_list {
-        ViewList::Active => " ACTIVE ",
+        ViewList::Active => {
+            if app.view_style == ViewStyle::Kanban {
+                " ACTIVE (KANBAN) "
+            } else {
+                " ACTIVE (LIST) "
+            }
+        }
         ViewList::Archive => " ARCHIVE ",
         ViewList::Routine => " ROUTINE ",
     };
@@ -92,6 +99,12 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
 fn draw_list(f: &mut Frame, app: &mut App, area: Rect) {
     if app.view_list == ViewList::Routine {
         draw_routine_list(f, app, area);
+    } else if app.view_list == ViewList::Active && app.view_style == ViewStyle::Kanban {
+        if area.width < 60 {
+            draw_narrow_warning(f, area);
+        } else {
+            draw_kanban_view(f, app, area);
+        }
     } else {
         draw_task_list(f, app, area);
     }
@@ -205,6 +218,183 @@ fn draw_task_list(f: &mut Frame, app: &mut App, area: Rect) {
             .thumb_symbol("█")
             .style(Style::default().fg(COLOR_CYAN));
         f.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
+    }
+}
+
+fn draw_narrow_warning(f: &mut Frame, area: Rect) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" 看板モード (KANBAN) ")
+        .border_style(Style::default().fg(COLOR_CRIMSON_RED));
+    let msg = vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            "ターミナル幅が狭いため看板モードを表示できません (幅60文字以上必要)。",
+            Style::default()
+                .fg(COLOR_CRIMSON_RED)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            "ウィンドウ幅を広げるか、[K] キーを押してリスト表示に切り替えてください。",
+            Style::default().fg(COLOR_TEXT_BODY),
+        )),
+    ];
+    let paragraph = Paragraph::new(msg)
+        .block(block)
+        .alignment(Alignment::Center);
+    f.render_widget(paragraph, area);
+}
+
+fn draw_kanban_view(f: &mut Frame, app: &mut App, area: Rect) {
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Ratio(1, 3),
+            Constraint::Ratio(1, 3),
+            Constraint::Ratio(1, 3),
+        ])
+        .split(area);
+
+    let columns = [
+        (KanbanColumn::Todo, chunks[0]),
+        (KanbanColumn::Doing, chunks[1]),
+        (KanbanColumn::Done, chunks[2]),
+    ];
+
+    let today = Local::now().date_naive();
+
+    for (col, col_area) in columns {
+        let is_current_col = app.kanban_col == col;
+        let tasks = app.kanban_column_tasks(col);
+        let selected_idx = app.kanban_selected_index(col);
+
+        let border_color = if is_current_col {
+            COLOR_CYAN
+        } else {
+            COLOR_BORDER
+        };
+
+        let title_style = if is_current_col {
+            Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(COLOR_TEXT_MUTED)
+        };
+
+        let col_title = format!(" {} ({}) ", col.title(), tasks.len());
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(col_title)
+            .title_style(title_style)
+            .border_style(Style::default().fg(border_color));
+
+        if tasks.is_empty() {
+            let empty_text = vec![
+                Line::from(""),
+                Line::from(Span::styled(
+                    "  (タスクなし)",
+                    Style::default().fg(COLOR_TEXT_MUTED),
+                )),
+            ];
+            let paragraph = Paragraph::new(empty_text).block(block);
+            f.render_widget(paragraph, col_area);
+        } else {
+            let items: Vec<ListItem> = tasks
+                .iter()
+                .enumerate()
+                .map(|(i, task)| {
+                    let is_selected = is_current_col && i == selected_idx;
+
+                    // 1. Cursor indicator
+                    let cursor_span = if is_selected {
+                        Span::styled(
+                            "▶ ",
+                            Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD),
+                        )
+                    } else {
+                        Span::raw("  ")
+                    };
+
+                    // 2. Priority indicator bar (▌)
+                    let p_color = priority_color(task.priority);
+                    let prio_bar1 = Span::styled(
+                        "▌ ",
+                        Style::default().fg(p_color).add_modifier(Modifier::BOLD),
+                    );
+                    let prio_bar2 = Span::styled(
+                        "▌ ",
+                        Style::default().fg(p_color).add_modifier(Modifier::BOLD),
+                    );
+
+                    // 3. Title
+                    let title_style = if task.status == TaskStatus::Done {
+                        Style::default()
+                            .fg(COLOR_TEXT_MUTED)
+                            .add_modifier(Modifier::CROSSED_OUT)
+                    } else if is_selected {
+                        Style::default()
+                            .fg(COLOR_TEXT_TITLE)
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(COLOR_TEXT_BODY)
+                    };
+                    let title_span = Span::styled(&task.title, title_style);
+
+                    let line1 = Line::from(vec![cursor_span, prio_bar1, title_span]);
+
+                    // 4. Due date + memo badge (2nd line also has priority bar for card-like appearance)
+                    let (due_str, due_col) = due_date_display(task.due_date, today);
+                    let due_span = if task.due_date.is_some() {
+                        Span::styled(due_str, Style::default().fg(due_col))
+                    } else {
+                        Span::styled("期日なし", Style::default().fg(COLOR_TEXT_MUTED))
+                    };
+
+                    let memo_span = if !task.description.trim().is_empty() {
+                        Span::styled("  [memo]", Style::default().fg(COLOR_CYAN))
+                    } else {
+                        Span::raw("")
+                    };
+
+                    let line2 = Line::from(vec![Span::raw("  "), prio_bar2, due_span, memo_span]);
+                    let line3 = Line::from(Span::styled("    ", Style::default().fg(COLOR_BORDER)));
+
+                    ListItem::new(vec![line1, line2, line3])
+                })
+                .collect();
+
+            let list_widget = List::new(items).block(block);
+
+            let mut list_state = ListState::default();
+            if is_current_col && !tasks.is_empty() {
+                list_state.select(Some(selected_idx));
+            }
+            f.render_stateful_widget(list_widget, col_area, &mut list_state);
+
+            let inner_height = col_area.height.saturating_sub(2) as usize;
+            let total_card_height = tasks.len() * 3;
+            if total_card_height > inner_height && inner_height > 0 {
+                let max_scroll = tasks.len().saturating_sub(inner_height / 3);
+                let current_pos = if is_current_col {
+                    selected_idx.min(max_scroll)
+                } else {
+                    0
+                };
+                let mut scrollbar_state = ScrollbarState::new(max_scroll).position(current_pos);
+                let scrollbar = Scrollbar::default()
+                    .orientation(ScrollbarOrientation::VerticalRight)
+                    .begin_symbol(Some("▲"))
+                    .end_symbol(Some("▼"))
+                    .track_symbol(Some("│"))
+                    .thumb_symbol("█")
+                    .style(Style::default().fg(if is_current_col {
+                        COLOR_CYAN
+                    } else {
+                        COLOR_BORDER
+                    }));
+                f.render_stateful_widget(scrollbar, col_area, &mut scrollbar_state);
+            }
+        }
     }
 }
 
@@ -324,8 +514,35 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
             Span::styled("[q] ", Style::default().fg(COLOR_CYAN)),
             Span::styled("Quit", Style::default().fg(COLOR_TEXT_MUTED)),
         ])
-    } else {
+    } else if app.view_list == ViewList::Active && app.view_style == ViewStyle::Kanban {
         Line::from(vec![
+            Span::styled(" [a] ", Style::default().fg(COLOR_CYAN)),
+            Span::styled("Add  ", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled("[h/l] ", Style::default().fg(COLOR_CYAN)),
+            Span::styled("Col  ", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled("[j/k] ", Style::default().fg(COLOR_CYAN)),
+            Span::styled("Item  ", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled("[Space] ", Style::default().fg(COLOR_CYAN)),
+            Span::styled("Done  ", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled("[i/I] ", Style::default().fg(COLOR_CYAN)),
+            Span::styled("InProg  ", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled("[e] ", Style::default().fg(COLOR_CYAN)),
+            Span::styled("Edit  ", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled("[v] ", Style::default().fg(COLOR_CYAN)),
+            Span::styled("View  ", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled("[d] ", Style::default().fg(COLOR_CYAN)),
+            Span::styled("Del  ", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled("[K] ", Style::default().fg(COLOR_CYAN)),
+            Span::styled("List  ", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled("[Tab] ", Style::default().fg(COLOR_CYAN)),
+            Span::styled("Tab  ", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled("[?] ", Style::default().fg(COLOR_CYAN)),
+            Span::styled("Help  ", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled("[q] ", Style::default().fg(COLOR_CYAN)),
+            Span::styled("Quit", Style::default().fg(COLOR_TEXT_MUTED)),
+        ])
+    } else {
+        let mut spans = vec![
             Span::styled(" [a] ", Style::default().fg(COLOR_CYAN)),
             Span::styled("Add  ", Style::default().fg(COLOR_TEXT_MUTED)),
             Span::styled("[Space] ", Style::default().fg(COLOR_CYAN)),
@@ -338,6 +555,15 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
             Span::styled("View  ", Style::default().fg(COLOR_TEXT_MUTED)),
             Span::styled("[d] ", Style::default().fg(COLOR_CYAN)),
             Span::styled("Del  ", Style::default().fg(COLOR_TEXT_MUTED)),
+        ];
+        if app.view_list == ViewList::Active {
+            spans.push(Span::styled("[K] ", Style::default().fg(COLOR_CYAN)));
+            spans.push(Span::styled(
+                "Kanban  ",
+                Style::default().fg(COLOR_TEXT_MUTED),
+            ));
+        }
+        spans.extend(vec![
             Span::styled("[A] ", Style::default().fg(COLOR_CYAN)),
             Span::styled(
                 if app.view_list == ViewList::Active {
@@ -353,7 +579,8 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
             Span::styled("Help  ", Style::default().fg(COLOR_TEXT_MUTED)),
             Span::styled("[q] ", Style::default().fg(COLOR_CYAN)),
             Span::styled("Quit", Style::default().fg(COLOR_TEXT_MUTED)),
-        ])
+        ]);
+        Line::from(spans)
     };
 
     let block = Block::default()
@@ -1155,7 +1382,7 @@ fn draw_delete_routine_confirm_modal(f: &mut Frame, routine: &Routine) {
 }
 
 fn draw_help_modal(f: &mut Frame) {
-    let area = centered_rect(65, 80, f.area());
+    let area = centered_rect(70, 85, f.area());
     f.render_widget(Clear, area);
 
     let block = Block::default()
@@ -1180,11 +1407,23 @@ fn draw_help_modal(f: &mut Frame) {
         ("  e / Enter", "詳細編集モーダル"),
         ("  v", "詳細閲覧モーダル"),
         ("  d", "削除確認モーダル (y/n)"),
+        ("  K", "看板モード ↔ リスト表示切り替え (Active時)"),
         ("  Tab", "Active → Archive → Routine のビュー巡回"),
         ("  A", "Active ↔ Archive 表示切り替え"),
         ("  R", "Active ↔ Routine 表示切り替え"),
         ("  ?", "ヘルプモーダル表示"),
         ("  q / Esc", "アプリケーション終了"),
+        ("", ""),
+        ("看板モード (Kanban)", ""),
+        ("  h / ←, l / →", "カラム間移動 (TODO ↔ DOING ↔ DONE)"),
+        ("  j / ↓, k / ↑", "カラム内タスクの循環移動"),
+        ("  Space", "完了トグル (Todo ↔ Done)"),
+        ("  i / I", "進行中に設定 (排他 / 並行)"),
+        ("  a", "新規タスク追加 (TODO列へ追加)"),
+        ("  e / Enter", "詳細編集モーダル"),
+        ("  v", "詳細閲覧モーダル"),
+        ("  d", "削除確認モーダル (y/n)"),
+        ("  K", "リスト表示へ戻る"),
         ("", ""),
         ("定期タスク画面 (Routine)", ""),
         ("  a", "新規定期タスク登録モーダル"),
