@@ -16,10 +16,16 @@ pub struct Config {
     pub archive_after_days: i64,
     #[serde(default)]
     pub default_view: ViewStyle,
+    #[serde(default = "default_select_new_task")]
+    pub select_new_task: bool,
 }
 
 fn default_archive_after_days() -> i64 {
     1
+}
+
+fn default_select_new_task() -> bool {
+    false
 }
 
 impl Default for Config {
@@ -27,6 +33,7 @@ impl Default for Config {
         Self {
             archive_after_days: 1,
             default_view: ViewStyle::List,
+            select_new_task: false,
         }
     }
 }
@@ -80,13 +87,16 @@ mod tests {
         let config = Config::default();
         assert_eq!(config.archive_after_days, 1);
         assert_eq!(config.default_view, ViewStyle::List);
+        assert!(!config.select_new_task);
     }
 
     #[test]
     fn test_config_deserialize() {
-        let toml_str = "archive_after_days = 3\ndefault_view = \"kanban\"\n";
+        let toml_str =
+            "archive_after_days = 3\ndefault_view = \"kanban\"\nselect_new_task = true\n";
         let config: Config = toml::from_str(toml_str).unwrap();
         assert_eq!(config.archive_after_days, 3);
         assert_eq!(config.default_view, ViewStyle::Kanban);
+        assert!(config.select_new_task);
     }
 }

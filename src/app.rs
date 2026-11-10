@@ -121,7 +121,7 @@ impl EditField {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EditState {
-    pub target_task_id: i64,
+    pub target_task_id: Option<i64>,
     pub title: String,
     pub description: String,
     pub status: TaskStatus,
@@ -187,7 +187,6 @@ pub struct ViewRoutineState {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AppMode {
     Normal,
-    NewTask(String), // input title
     EditTask(EditState),
     ViewTask(ViewTaskState),
     DeleteConfirm(Task),
@@ -485,7 +484,6 @@ impl App {
     pub fn handle_key_event(&mut self, key: KeyEvent) {
         match &self.mode {
             AppMode::Normal => self.handle_normal_key(key),
-            AppMode::NewTask(_) => self.handle_new_task_key(key),
             AppMode::EditTask(_) => self.handle_edit_key(key),
             AppMode::ViewTask(_) => self.handle_view_key(key),
             AppMode::DeleteConfirm(_) => self.handle_delete_confirm_key(key),
@@ -594,7 +592,15 @@ impl App {
                     }
                 }
                 (KeyModifiers::NONE, KeyCode::Char('a')) => {
-                    self.mode = AppMode::NewTask(String::new());
+                    self.mode = AppMode::EditTask(EditState {
+                        target_task_id: None,
+                        title: String::new(),
+                        description: String::new(),
+                        status: TaskStatus::Todo,
+                        priority: Priority::Medium,
+                        due_date_str: String::new(),
+                        active_field: EditField::Title,
+                    });
                 }
                 (KeyModifiers::NONE, KeyCode::Char('e')) | (KeyModifiers::NONE, KeyCode::Enter) => {
                     if let Some(task) = self.selected_task() {
@@ -603,7 +609,7 @@ impl App {
                             .map(|d| d.format("%Y-%m-%d").to_string())
                             .unwrap_or_default();
                         self.mode = AppMode::EditTask(EditState {
-                            target_task_id: task.id,
+                            target_task_id: Some(task.id),
                             title: task.title,
                             description: task.description,
                             status: task.status,
@@ -709,7 +715,15 @@ impl App {
                     }
                 }
                 (KeyModifiers::NONE, KeyCode::Char('a')) if self.view_list == ViewList::Active => {
-                    self.mode = AppMode::NewTask(String::new());
+                    self.mode = AppMode::EditTask(EditState {
+                        target_task_id: None,
+                        title: String::new(),
+                        description: String::new(),
+                        status: TaskStatus::Todo,
+                        priority: Priority::Medium,
+                        due_date_str: String::new(),
+                        active_field: EditField::Title,
+                    });
                 }
                 (KeyModifiers::NONE, KeyCode::Char('e')) | (KeyModifiers::NONE, KeyCode::Enter)
                     if self.view_list == ViewList::Active =>
@@ -720,7 +734,7 @@ impl App {
                             .map(|d| d.format("%Y-%m-%d").to_string())
                             .unwrap_or_default();
                         self.mode = AppMode::EditTask(EditState {
-                            target_task_id: task.id,
+                            target_task_id: Some(task.id),
                             title: task.title,
                             description: task.description,
                             status: task.status,
@@ -748,33 +762,6 @@ impl App {
         }
     }
 
-    fn handle_new_task_key(&mut self, key: KeyEvent) {
-        if let AppMode::NewTask(ref mut title) = self.mode {
-            match key.code {
-                KeyCode::Esc => {
-                    self.mode = AppMode::Normal;
-                }
-                KeyCode::Enter => {
-                    let trimmed = title.trim();
-                    if !trimmed.is_empty() {
-                        let _ =
-                            self.db
-                                .add_task(trimmed, "", TaskStatus::Todo, Priority::Medium, None);
-                        self.clamp_selection();
-                    }
-                    self.mode = AppMode::Normal;
-                }
-                KeyCode::Backspace => {
-                    title.pop();
-                }
-                KeyCode::Char(c) => {
-                    title.push(c);
-                }
-                _ => {}
-            }
-        }
-    }
-
     fn handle_edit_key(&mut self, key: KeyEvent) {
         let is_ctrl_enter =
             key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Enter;
@@ -785,18 +772,39 @@ impl App {
             if is_ctrl_enter
                 || (key.code == KeyCode::Enter && state.active_field != EditField::Description)
             {
-                let due_date =
-                    NaiveDate::parse_from_str(state.due_date_str.trim(), "%Y-%m-%d").ok();
-                let _ = self.db.update_task(
-                    state.target_task_id,
-                    state.title.trim(),
-                    state.description.trim(),
-                    state.status,
-                    state.priority,
-                    due_date,
-                );
+                let trimmed_title = state.title.trim();
+                if !trimmed_title.is_empty() {
+                    let due_date =
+                        NaiveDate::parse_from_str(state.due_date_str.trim(), "%Y-%m-%d").ok();
+                    if let Some(id) = state.target_task_id {
+                        let _ = self.db.update_task(
+                            id,
+                            trimmed_title,
+                            state.description.trim(),
+                            state.status,
+                            state.priority,
+                            due_date,
+                        );
+                    } else {
+                        let created = self.db.add_task(
+                            trimmed_title,
+                            state.description.trim(),
+                            state.status,
+                            state.priority,
+                            due_date,
+                        );
+                        if self.config.select_new_task {
+                            if let Ok(id) = created {
+                                let tasks = self.current_tasks();
+                                if let Some(pos) = tasks.iter().position(|t| t.id == id) {
+                                    self.selected_index = pos;
+                                }
+                            }
+                        }
+                    }
+                    self.clamp_selection();
+                }
                 self.mode = AppMode::Normal;
-                self.clamp_selection();
                 return;
             }
 
@@ -1160,7 +1168,7 @@ mod tests {
     fn test_key_quick_add_task() {
         let mut app = create_test_app();
         app.handle_key_event(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE));
-        assert!(matches!(app.mode, AppMode::NewTask(_)));
+        assert!(matches!(app.mode, AppMode::EditTask(ref state) if state.target_task_id.is_none()));
 
         for c in "Buy milk".chars() {
             app.handle_key_event(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
@@ -1171,6 +1179,100 @@ mod tests {
         let tasks = app.current_tasks();
         assert_eq!(tasks.len(), 3);
         assert_eq!(tasks[2].title, "Buy milk");
+        assert_eq!(tasks[2].status, TaskStatus::Todo);
+        assert_eq!(tasks[2].priority, Priority::Medium);
+    }
+
+    #[test]
+    fn test_key_add_task_full_details() {
+        let mut app = create_test_app();
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE));
+
+        // 1. Title
+        for c in "Complex Task".chars() {
+            app.handle_key_event(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+        }
+
+        // 2. Tab -> Description
+        app.handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        for c in "Some detailed info".chars() {
+            app.handle_key_event(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+        }
+
+        // 3. Tab -> Status
+        app.handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        // cycle status with Space: Todo -> InProgress
+        app.handle_key_event(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+
+        // 4. Tab -> Priority
+        app.handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        // cycle priority with Space: Medium -> High
+        app.handle_key_event(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+
+        // 5. Tab -> DueDate
+        app.handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        for c in "2026-12-25".chars() {
+            app.handle_key_event(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+        }
+
+        // Save with Ctrl+Enter
+        app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL));
+
+        assert_eq!(app.mode, AppMode::Normal);
+        let tasks = app.current_tasks();
+        assert_eq!(tasks.len(), 3);
+        let created = &tasks[2];
+        assert_eq!(created.title, "Complex Task");
+        assert_eq!(created.description, "Some detailed info");
+        assert_eq!(created.status, TaskStatus::InProgress);
+        assert_eq!(created.priority, Priority::High);
+        assert_eq!(
+            created.due_date,
+            Some(NaiveDate::from_ymd_opt(2026, 12, 25).unwrap())
+        );
+    }
+
+    #[test]
+    fn test_key_add_task_empty_title_cancels() {
+        let mut app = create_test_app();
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE));
+        assert!(matches!(app.mode, AppMode::EditTask(ref state) if state.target_task_id.is_none()));
+
+        // Press Enter with empty title
+        app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert_eq!(app.mode, AppMode::Normal);
+        assert_eq!(app.current_tasks().len(), 2);
+    }
+
+    #[test]
+    fn test_key_add_task_select_new_task_config() {
+        // Case 1: select_new_task = false (default)
+        let mut app_default = create_test_app();
+        assert_eq!(app_default.selected_index, 0);
+        app_default.handle_key_event(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE));
+        for c in "Task A".chars() {
+            app_default.handle_key_event(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+        }
+        app_default.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(app_default.selected_index, 0);
+
+        // Case 2: select_new_task = true
+        let db = Db::open_in_memory().unwrap();
+        let mut config = Config::default();
+        config.select_new_task = true;
+        let mut app_select = App::new(db, config);
+        let _ = app_select
+            .db
+            .add_task("Existing", "", TaskStatus::Todo, Priority::Medium, None);
+        assert_eq!(app_select.selected_index, 0);
+
+        app_select.handle_key_event(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE));
+        for c in "Task B".chars() {
+            app_select.handle_key_event(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+        }
+        app_select.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(app_select.selected_index, 1);
     }
 
     #[test]
@@ -1525,7 +1627,10 @@ mod tests {
 
         // Quick add a new task from Doing column
         app.handle_key_event(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE));
-        assert!(matches!(app.mode, AppMode::NewTask(_)));
+        assert!(matches!(
+            app.mode,
+            AppMode::EditTask(ref state) if state.target_task_id.is_none()
+        ));
         for c in "New Todo".chars() {
             app.handle_key_event(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
         }

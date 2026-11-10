@@ -33,7 +33,6 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
     match &app.mode {
         AppMode::Normal => {}
-        AppMode::NewTask(title) => draw_new_task_modal(f, title),
         AppMode::EditTask(edit_state) => draw_edit_modal(f, edit_state),
         AppMode::ViewTask(view_state) => draw_view_modal(f, view_state),
         AppMode::DeleteConfirm(task) => draw_delete_confirm_modal(f, task),
@@ -579,55 +578,19 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(paragraph, area);
 }
 
-fn draw_new_task_modal(f: &mut Frame, title: &str) {
-    let area = centered_rect(60, 20, f.area());
-    f.render_widget(Clear, area);
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(" 新規タスク追加 (Quick Add) ")
-        .title_style(Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD))
-        .border_style(Style::default().fg(COLOR_CYAN));
-
-    let inner = block.inner(area);
-    f.render_widget(block, area);
-
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1),
-            Constraint::Length(2),
-            Constraint::Length(1),
-        ])
-        .split(inner);
-
-    let prompt =
-        Paragraph::new("タスク名を入力してください:").style(Style::default().fg(COLOR_TEXT_TITLE));
-    f.render_widget(prompt, chunks[0]);
-
-    let input_line = Line::from(vec![
-        Span::styled(title, Style::default().fg(COLOR_TEXT_BODY)),
-        Span::styled("█", Style::default().fg(COLOR_CYAN)),
-    ]);
-    let input_widget = Paragraph::new(input_line).block(
-        Block::default()
-            .borders(Borders::BOTTOM)
-            .border_style(Style::default().fg(COLOR_BORDER)),
-    );
-    f.render_widget(input_widget, chunks[1]);
-
-    let footer = Paragraph::new("[Enter] 作成  [Esc] キャンセル")
-        .style(Style::default().fg(COLOR_TEXT_MUTED));
-    f.render_widget(footer, chunks[2]);
-}
-
 fn draw_edit_modal(f: &mut Frame, state: &EditState) {
     let area = centered_rect(75, 70, f.area());
     f.render_widget(Clear, area);
 
+    let modal_title = if state.target_task_id.is_some() {
+        " タスク編集 "
+    } else {
+        " 新規タスク作成 "
+    };
+
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(" タスク編集 ")
+        .title(modal_title)
         .title_style(Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD))
         .border_style(Style::default().fg(COLOR_CYAN));
 
