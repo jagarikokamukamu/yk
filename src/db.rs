@@ -51,6 +51,7 @@ impl Db {
         Ok(db)
     }
 
+    #[allow(dead_code)]
     pub fn conn(&self) -> &Connection {
         &self.conn
     }

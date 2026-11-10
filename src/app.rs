@@ -41,6 +41,7 @@ impl KanbanColumn {
         }
     }
 
+    #[allow(dead_code)]
     pub fn to_status(self) -> TaskStatus {
         match self {
             KanbanColumn::Todo => TaskStatus::Todo,
