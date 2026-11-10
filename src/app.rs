@@ -40,13 +40,49 @@ impl KanbanColumn {
             KanbanColumn::Done => "DONE",
         }
     }
+    pub fn to_status(self) -> TaskStatus {
+        match self {
+            KanbanColumn::Todo => TaskStatus::Todo,
+            KanbanColumn::Doing => TaskStatus::InProgress,
+            KanbanColumn::Done => TaskStatus::Done,
+        }
+    }
+
+    pub fn from_status(status: TaskStatus) -> Self {
+        match status {
+            TaskStatus::Todo => KanbanColumn::Todo,
+            TaskStatus::InProgress => KanbanColumn::Doing,
+            TaskStatus::Done => KanbanColumn::Done,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ViewList {
     Active,
+    Kanban,
     Archive,
     Routine,
+}
+
+impl ViewList {
+    pub fn next(&self) -> Self {
+        match self {
+            ViewList::Active => ViewList::Kanban,
+            ViewList::Kanban => ViewList::Archive,
+            ViewList::Archive => ViewList::Routine,
+            ViewList::Routine => ViewList::Active,
+        }
+    }
+
+    pub fn prev(&self) -> Self {
+        match self {
+            ViewList::Active => ViewList::Routine,
+            ViewList::Kanban => ViewList::Active,
+            ViewList::Archive => ViewList::Kanban,
+            ViewList::Routine => ViewList::Archive,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -163,7 +199,6 @@ pub struct App {
     pub config: Config,
     pub mode: AppMode,
     pub view_list: ViewList,
-    pub view_style: ViewStyle,
     pub selected_index: usize,
     pub list_state: ListState,
     pub kanban_col: KanbanColumn,
@@ -178,13 +213,15 @@ impl App {
 
         let mut list_state = ListState::default();
         list_state.select(Some(0));
-        let view_style = config.default_view;
+        let view_list = match config.default_view {
+            ViewStyle::List => ViewList::Active,
+            ViewStyle::Kanban => ViewList::Kanban,
+        };
         Self {
             db,
             config,
             mode: AppMode::Normal,
-            view_list: ViewList::Active,
-            view_style,
+            view_list,
             selected_index: 0,
             list_state,
             kanban_col: KanbanColumn::Todo,
@@ -199,7 +236,9 @@ impl App {
         all_tasks
             .into_iter()
             .filter(|t| match self.view_list {
-                ViewList::Active => !t.is_archived(self.config.archive_after_days, now),
+                ViewList::Active | ViewList::Kanban => {
+                    !t.is_archived(self.config.archive_after_days, now)
+                }
                 ViewList::Archive => t.is_archived(self.config.archive_after_days, now),
                 ViewList::Routine => false,
             })
@@ -246,44 +285,6 @@ impl App {
         }
     }
 
-    pub fn toggle_view_style(&mut self) {
-        if self.view_list != ViewList::Active {
-            return;
-        }
-
-        match self.view_style {
-            ViewStyle::List => {
-                // リストから看板への切り替え: 選択中タスクの位置を引き継ぐ
-                if let Some(task) = self.selected_task() {
-                    let target_col = match task.status {
-                        TaskStatus::Todo => KanbanColumn::Todo,
-                        TaskStatus::InProgress => KanbanColumn::Doing,
-                        TaskStatus::Done => KanbanColumn::Done,
-                    };
-                    self.kanban_col = target_col;
-                    let col_tasks = self.kanban_column_tasks(target_col);
-                    if let Some(pos) = col_tasks.iter().position(|t| t.id == task.id) {
-                        self.kanban_indices[Self::col_to_idx(target_col)] = pos;
-                    }
-                }
-                self.view_style = ViewStyle::Kanban;
-                self.clamp_kanban_selection();
-            }
-            ViewStyle::Kanban => {
-                // 看板からリストへの切り替え: 選択中タスクの位置を引き継ぐ
-                if let Some(task) = self.selected_task() {
-                    let active_tasks = self.current_tasks();
-                    if let Some(pos) = active_tasks.iter().position(|t| t.id == task.id) {
-                        self.selected_index = pos;
-                        self.list_state.select(Some(pos));
-                    }
-                }
-                self.view_style = ViewStyle::List;
-                self.clamp_selection();
-            }
-        }
-    }
-
     pub fn kanban_next_col(&mut self) {
         self.kanban_col = self.kanban_col.next();
         self.clamp_kanban_selection();
@@ -320,6 +321,132 @@ impl App {
         }
     }
 
+    pub fn switch_view(&mut self, target: ViewList) {
+        if self.view_list == target {
+            return;
+        }
+
+        // 遷移前の選択中タスクを取得
+        let selected_id = self.selected_task().map(|t| t.id);
+
+        self.view_list = target;
+
+        // 遷移先の画面で同じタスクがあればフォーカスを同期
+        if let Some(id) = selected_id {
+            match target {
+                ViewList::Kanban => {
+                    let active_tasks = self.current_tasks();
+                    if let Some(task) = active_tasks.iter().find(|t| t.id == id) {
+                        let col = KanbanColumn::from_status(task.status);
+                        self.kanban_col = col;
+                        let col_tasks = self.kanban_column_tasks(col);
+                        if let Some(pos) = col_tasks.iter().position(|t| t.id == id) {
+                            self.kanban_indices[Self::col_to_idx(col)] = pos;
+                        }
+                    }
+                }
+                ViewList::Active | ViewList::Archive => {
+                    let tasks = self.current_tasks();
+                    if let Some(pos) = tasks.iter().position(|t| t.id == id) {
+                        self.selected_index = pos;
+                        self.list_state.select(Some(pos));
+                    }
+                }
+                ViewList::Routine => {}
+            }
+        }
+
+        self.clamp_selection();
+    }
+
+    pub fn kanban_focus_task_id(&mut self, task_id: i64, fallback_col: KanbanColumn) {
+        let active_tasks = self.current_tasks();
+        if let Some(task) = active_tasks.iter().find(|t| t.id == task_id) {
+            let col = KanbanColumn::from_status(task.status);
+            self.kanban_col = col;
+            let col_tasks = self.kanban_column_tasks(col);
+            if let Some(pos) = col_tasks.iter().position(|t| t.id == task_id) {
+                self.kanban_indices[Self::col_to_idx(col)] = pos;
+            }
+        } else {
+            self.kanban_col = fallback_col;
+        }
+        self.clamp_kanban_selection();
+    }
+
+    pub fn kanban_move_task_right(&mut self) {
+        if self.view_list != ViewList::Kanban {
+            return;
+        }
+        if let Some(task) = self.selected_task() {
+            let new_status = match task.status {
+                TaskStatus::Todo => TaskStatus::InProgress,
+                TaskStatus::InProgress => TaskStatus::Done,
+                TaskStatus::Done => return,
+            };
+            let _ = self.db.update_task(
+                task.id,
+                &task.title,
+                &task.description,
+                new_status,
+                task.priority,
+                task.due_date,
+            );
+            self.kanban_focus_task_id(task.id, KanbanColumn::from_status(new_status));
+        }
+    }
+
+    pub fn kanban_move_task_left(&mut self) {
+        if self.view_list != ViewList::Kanban {
+            return;
+        }
+        if let Some(task) = self.selected_task() {
+            let new_status = match task.status {
+                TaskStatus::Done => TaskStatus::InProgress,
+                TaskStatus::InProgress => TaskStatus::Todo,
+                TaskStatus::Todo => return,
+            };
+            let _ = self.db.update_task(
+                task.id,
+                &task.title,
+                &task.description,
+                new_status,
+                task.priority,
+                task.due_date,
+            );
+            self.kanban_focus_task_id(task.id, KanbanColumn::from_status(new_status));
+        }
+    }
+
+    pub fn toggle_completed_current_task(&mut self) {
+        if let Some(task) = self.selected_task() {
+            let _ = self.db.toggle_completed(task.id);
+            if self.view_list == ViewList::Kanban {
+                let target_col = match task.status {
+                    TaskStatus::Done => KanbanColumn::Todo,
+                    _ => KanbanColumn::Done,
+                };
+                self.kanban_focus_task_id(task.id, target_col);
+            } else {
+                self.clamp_selection();
+            }
+        }
+    }
+
+    pub fn set_in_progress_current_task(&mut self, exclusive: bool) {
+        if let Some(task) = self.selected_task() {
+            if exclusive {
+                let _ = self.db.set_exclusive_in_progress(task.id);
+            } else {
+                let _ = self.db.set_parallel_in_progress(task.id);
+            }
+            if self.view_list == ViewList::Kanban {
+                self.kanban_focus_task_id(task.id, KanbanColumn::Doing);
+            } else {
+                self.clamp_selection();
+            }
+        }
+    }
     pub fn current_routines(&self) -> Vec<Routine> {
         self.db.get_all_routines().unwrap_or_default()
     }
@@ -327,12 +454,13 @@ impl App {
     pub fn current_item_count(&self) -> usize {
         match self.view_list {
             ViewList::Routine => self.current_routines().len(),
+            ViewList::Kanban => self.kanban_current_column_tasks().len(),
             _ => self.current_tasks().len(),
         }
     }
 
     pub fn selected_task(&self) -> Option<Task> {
-        if self.view_list == ViewList::Active && self.view_style == ViewStyle::Kanban {
+        if self.view_list == ViewList::Kanban {
             let tasks = self.kanban_current_column_tasks();
             if tasks.is_empty() {
                 None
@@ -364,6 +492,10 @@ impl App {
     }
 
     pub fn move_down(&mut self) {
+        if self.view_list == ViewList::Kanban {
+            self.kanban_move_down();
+            return;
+        }
         let count = self.current_item_count();
         if count == 0 {
             self.selected_index = 0;
@@ -379,6 +511,10 @@ impl App {
     }
 
     pub fn move_up(&mut self) {
+        if self.view_list == ViewList::Kanban {
+            self.kanban_move_up();
+            return;
+        }
         let count = self.current_item_count();
         if count == 0 {
             self.selected_index = 0;
@@ -394,7 +530,11 @@ impl App {
     }
 
     pub fn clamp_selection(&mut self) {
-        let count = self.current_item_count();
+        let count = if self.view_list == ViewList::Routine {
+            self.current_routines().len()
+        } else {
+            self.current_tasks().len()
+        };
         if count == 0 {
             self.selected_index = 0;
         } else if self.selected_index >= count {
@@ -419,14 +559,13 @@ impl App {
     }
 
     fn handle_normal_key(&mut self, key: KeyEvent) {
-        // Tab cycles through Active -> Archive -> Routine
+        // Tab / BackTab cycles through Active -> Kanban -> Archive -> Routine
         if key.code == KeyCode::Tab {
-            self.view_list = match self.view_list {
-                ViewList::Active => ViewList::Archive,
-                ViewList::Archive => ViewList::Routine,
-                ViewList::Routine => ViewList::Active,
-            };
-            self.clamp_selection();
+            self.switch_view(self.view_list.next());
+            return;
+        }
+        if key.code == KeyCode::BackTab {
+            self.switch_view(self.view_list.prev());
             return;
         }
 
@@ -436,29 +575,20 @@ impl App {
                 self.should_quit = true;
                 return;
             }
-            (KeyModifiers::SHIFT, KeyCode::Char('K'))
-            | (KeyModifiers::NONE, KeyCode::Char('K')) => {
-                self.toggle_view_style();
+            (KeyModifiers::NONE, KeyCode::Char('1')) => {
+                self.switch_view(ViewList::Active);
                 return;
             }
-            (KeyModifiers::SHIFT, KeyCode::Char('A'))
-            | (KeyModifiers::NONE, KeyCode::Char('A')) => {
-                self.view_list = if self.view_list == ViewList::Archive {
-                    ViewList::Active
-                } else {
-                    ViewList::Archive
-                };
-                self.clamp_selection();
+            (KeyModifiers::NONE, KeyCode::Char('2')) => {
+                self.switch_view(ViewList::Kanban);
                 return;
             }
-            (KeyModifiers::SHIFT, KeyCode::Char('R'))
-            | (KeyModifiers::NONE, KeyCode::Char('R')) => {
-                self.view_list = if self.view_list == ViewList::Routine {
-                    ViewList::Active
-                } else {
-                    ViewList::Routine
-                };
-                self.clamp_selection();
+            (KeyModifiers::NONE, KeyCode::Char('3')) => {
+                self.switch_view(ViewList::Archive);
+                return;
+            }
+            (KeyModifiers::NONE, KeyCode::Char('4')) => {
+                self.switch_view(ViewList::Routine);
                 return;
             }
             (KeyModifiers::NONE, KeyCode::Char('?')) => {
@@ -469,7 +599,7 @@ impl App {
         }
 
         // Navigation keybindings
-        if self.view_list == ViewList::Active && self.view_style == ViewStyle::Kanban {
+        if self.view_list == ViewList::Kanban {
             match (key.modifiers, key.code) {
                 (KeyModifiers::NONE, KeyCode::Char('j')) | (KeyModifiers::NONE, KeyCode::Down) => {
                     self.kanban_move_down();
@@ -551,27 +681,76 @@ impl App {
                 }
                 _ => {}
             }
+        } else if self.view_list == ViewList::Kanban {
+            // Kanban Task operations
+            match (key.modifiers, key.code) {
+                (KeyModifiers::SHIFT, KeyCode::Char('L'))
+                | (KeyModifiers::NONE, KeyCode::Char('L'))
+                | (KeyModifiers::NONE, KeyCode::Char('>')) => {
+                    self.kanban_move_task_right();
+                }
+                (KeyModifiers::SHIFT, KeyCode::Char('H'))
+                | (KeyModifiers::NONE, KeyCode::Char('H'))
+                | (KeyModifiers::NONE, KeyCode::Char('<')) => {
+                    self.kanban_move_task_left();
+                }
+                (KeyModifiers::NONE, KeyCode::Char(' ')) => {
+                    self.toggle_completed_current_task();
+                }
+                (KeyModifiers::NONE, KeyCode::Char('i')) => {
+                    self.set_in_progress_current_task(true);
+                }
+                (KeyModifiers::SHIFT, KeyCode::Char('I'))
+                | (KeyModifiers::NONE, KeyCode::Char('I')) => {
+                    self.set_in_progress_current_task(false);
+                }
+                (KeyModifiers::NONE, KeyCode::Char('a')) => {
+                    self.mode = AppMode::NewTask(String::new());
+                }
+                (KeyModifiers::NONE, KeyCode::Char('e')) | (KeyModifiers::NONE, KeyCode::Enter) => {
+                    if let Some(task) = self.selected_task() {
+                        let due_date_str = task
+                            .due_date
+                            .map(|d| d.format("%Y-%m-%d").to_string())
+                            .unwrap_or_default();
+                        self.mode = AppMode::EditTask(EditState {
+                            target_task_id: task.id,
+                            title: task.title,
+                            description: task.description,
+                            status: task.status,
+                            priority: task.priority,
+                            due_date_str,
+                            active_field: EditField::Title,
+                        });
+                    }
+                }
+                (KeyModifiers::NONE, KeyCode::Char('v')) => {
+                    if let Some(task) = self.selected_task() {
+                        self.mode = AppMode::ViewTask(ViewTaskState {
+                            task,
+                            scroll_offset: 0,
+                        });
+                    }
+                }
+                (KeyModifiers::NONE, KeyCode::Char('d')) => {
+                    if let Some(task) = self.selected_task() {
+                        self.mode = AppMode::DeleteConfirm(task);
+                    }
+                }
+                _ => {}
+            }
         } else {
             // Active / Archive Task operations
             match (key.modifiers, key.code) {
                 (KeyModifiers::NONE, KeyCode::Char(' ')) => {
-                    if let Some(task) = self.selected_task() {
-                        let _ = self.db.toggle_completed(task.id);
-                        self.clamp_selection();
-                    }
+                    self.toggle_completed_current_task();
                 }
                 (KeyModifiers::NONE, KeyCode::Char('i')) => {
-                    if let Some(task) = self.selected_task() {
-                        let _ = self.db.set_exclusive_in_progress(task.id);
-                        self.clamp_selection();
-                    }
+                    self.set_in_progress_current_task(true);
                 }
                 (KeyModifiers::SHIFT, KeyCode::Char('I'))
                 | (KeyModifiers::NONE, KeyCode::Char('I')) => {
-                    if let Some(task) = self.selected_task() {
-                        let _ = self.db.set_parallel_in_progress(task.id);
-                        self.clamp_selection();
-                    }
+                    self.set_in_progress_current_task(false);
                 }
                 (KeyModifiers::NONE, KeyCode::Char('a')) => {
                     self.mode = AppMode::NewTask(String::new());
@@ -620,10 +799,21 @@ impl App {
                 KeyCode::Enter => {
                     let trimmed = title.trim();
                     if !trimmed.is_empty() {
-                        let _ =
+                        let initial_status = if self.view_list == ViewList::Kanban {
+                            self.kanban_col.to_status()
+                        } else {
+                            TaskStatus::Todo
+                        };
+                        if let Ok(id) =
                             self.db
-                                .add_task(trimmed, "", TaskStatus::Todo, Priority::Medium, None);
-                        self.clamp_selection();
+                                .add_task(trimmed, "", initial_status, Priority::Medium, None)
+                        {
+                            if self.view_list == ViewList::Kanban {
+                                self.kanban_focus_task_id(id, self.kanban_col);
+                            } else {
+                                self.clamp_selection();
+                            }
+                        }
                     }
                     self.mode = AppMode::Normal;
                 }
@@ -658,8 +848,14 @@ impl App {
                     state.priority,
                     due_date,
                 );
+                let task_id = state.target_task_id;
+                let target_status = state.status;
                 self.mode = AppMode::Normal;
-                self.clamp_selection();
+                if self.view_list == ViewList::Kanban {
+                    self.kanban_focus_task_id(task_id, KanbanColumn::from_status(target_status));
+                } else {
+                    self.clamp_selection();
+                }
                 return;
             }
 
@@ -1125,8 +1321,8 @@ mod tests {
     #[test]
     fn test_routine_view_navigation_and_crud() {
         let mut app = create_test_app();
-        // Switch to Routine view with 'R'
-        app.handle_key_event(KeyEvent::new(KeyCode::Char('R'), KeyModifiers::NONE));
+        // Switch to Routine view with '4'
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('4'), KeyModifiers::NONE));
         assert_eq!(app.view_list, ViewList::Routine);
 
         // Open add routine modal with 'a'
@@ -1163,8 +1359,8 @@ mod tests {
         // Generate instance manually with 'p'
         app.handle_key_event(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE));
 
-        // Switch back to Active view with 'R'
-        app.handle_key_event(KeyEvent::new(KeyCode::Char('R'), KeyModifiers::NONE));
+        // Switch back to Active view with '1'
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('1'), KeyModifiers::NONE));
         assert_eq!(app.view_list, ViewList::Active);
         let tasks = app.current_tasks();
         assert_eq!(tasks.len(), 3);
@@ -1172,95 +1368,196 @@ mod tests {
     }
 
     #[test]
-    fn test_kanban_toggle_and_focus_transfer() {
+    fn test_four_views_navigation() {
         let mut app = create_test_app();
-        assert_eq!(app.view_style, ViewStyle::List);
+        assert_eq!(app.view_list, ViewList::Active);
 
-        // Task 0 is Todo, Task 1 is InProgress
+        // Tab: Active -> Kanban -> Archive -> Routine -> Active
+        app.handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        assert_eq!(app.view_list, ViewList::Kanban);
+        app.handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        assert_eq!(app.view_list, ViewList::Archive);
+        app.handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        assert_eq!(app.view_list, ViewList::Routine);
+        app.handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        assert_eq!(app.view_list, ViewList::Active);
+
+        // BackTab: Active -> Routine -> Archive -> Kanban -> Active
+        app.handle_key_event(KeyEvent::new(KeyCode::BackTab, KeyModifiers::NONE));
+        assert_eq!(app.view_list, ViewList::Routine);
+        app.handle_key_event(KeyEvent::new(KeyCode::BackTab, KeyModifiers::NONE));
+        assert_eq!(app.view_list, ViewList::Archive);
+        app.handle_key_event(KeyEvent::new(KeyCode::BackTab, KeyModifiers::NONE));
+        assert_eq!(app.view_list, ViewList::Kanban);
+        app.handle_key_event(KeyEvent::new(KeyCode::BackTab, KeyModifiers::NONE));
+        assert_eq!(app.view_list, ViewList::Active);
+
+        // Direct number keys
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE));
+        assert_eq!(app.view_list, ViewList::Kanban);
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('3'), KeyModifiers::NONE));
+        assert_eq!(app.view_list, ViewList::Archive);
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('4'), KeyModifiers::NONE));
+        assert_eq!(app.view_list, ViewList::Routine);
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('1'), KeyModifiers::NONE));
+        assert_eq!(app.view_list, ViewList::Active);
+    }
+
+    #[test]
+    fn test_view_switch_focus_transfer() {
+        let mut app = create_test_app();
+        // Task 1: First Task (Todo), Task 2: Second Task (InProgress)
         app.move_down();
-        assert_eq!(app.selected_task().unwrap().title, "Second Task");
+        assert_eq!(app.selected_index, 1);
+        let selected = app.selected_task().unwrap();
+        assert_eq!(selected.title, "Second Task");
+        assert_eq!(selected.status, TaskStatus::InProgress);
 
-        // Toggle to Kanban with 'K'
-        app.handle_key_event(KeyEvent::new(KeyCode::Char('K'), KeyModifiers::NONE));
-        assert_eq!(app.view_style, ViewStyle::Kanban);
-        // Second Task was InProgress -> kanban_col should be Doing
+        // Switch to Kanban -> Should automatically focus Doing column and Second Task
+        app.switch_view(ViewList::Kanban);
         assert_eq!(app.kanban_col, KanbanColumn::Doing);
-        assert_eq!(app.selected_task().unwrap().title, "Second Task");
+        let kanban_selected = app.selected_task().unwrap();
+        assert_eq!(kanban_selected.id, selected.id);
 
-        // Move to Todo column with 'h'
-        app.handle_key_event(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE));
+        // Move to Todo column in Kanban
+        app.kanban_prev_col();
         assert_eq!(app.kanban_col, KanbanColumn::Todo);
-        assert_eq!(app.selected_task().unwrap().title, "First Task");
+        let todo_task = app.selected_task().unwrap();
+        assert_eq!(todo_task.title, "First Task");
 
-        // Toggle back to List with 'K'
-        app.handle_key_event(KeyEvent::new(KeyCode::Char('K'), KeyModifiers::NONE));
-        assert_eq!(app.view_style, ViewStyle::List);
+        // Switch back to Active -> Should automatically focus First Task (index 0)
+        app.switch_view(ViewList::Active);
         assert_eq!(app.selected_index, 0);
-        assert_eq!(app.selected_task().unwrap().title, "First Task");
+        assert_eq!(app.selected_task().unwrap().id, todo_task.id);
     }
 
     #[test]
-    fn test_kanban_navigation_and_empty_column() {
+    fn test_kanban_column_navigation_and_quick_add() {
         let mut app = create_test_app();
-        app.handle_key_event(KeyEvent::new(KeyCode::Char('K'), KeyModifiers::NONE));
+        app.switch_view(ViewList::Kanban);
         assert_eq!(app.kanban_col, KanbanColumn::Todo);
 
-        // Move right with 'l' -> Doing
+        // Navigate columns: Todo -> Doing -> Done -> Todo
         app.handle_key_event(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE));
         assert_eq!(app.kanban_col, KanbanColumn::Doing);
-
-        // Move right with 'Right' -> Done (currently 0 tasks in Done)
-        app.handle_key_event(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE));
         assert_eq!(app.kanban_col, KanbanColumn::Done);
-        assert!(app.selected_task().is_none());
-
-        // Move right again with 'l' -> wraps to Todo
         app.handle_key_event(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE));
         assert_eq!(app.kanban_col, KanbanColumn::Todo);
-        assert!(app.selected_task().is_some());
 
-        // Move left with 'Left' -> wraps to Done
-        app.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
-        assert_eq!(app.kanban_col, KanbanColumn::Done);
-    }
-
-    #[test]
-    fn test_kanban_actions_and_quick_add() {
-        let mut app = create_test_app();
-        app.handle_key_event(KeyEvent::new(KeyCode::Char('K'), KeyModifiers::NONE));
-
-        // In Todo column, toggle complete with Space -> moves to Done column
-        assert_eq!(app.kanban_col, KanbanColumn::Todo);
-        assert_eq!(app.kanban_column_tasks(KanbanColumn::Todo).len(), 1);
-        assert_eq!(app.kanban_column_tasks(KanbanColumn::Done).len(), 0);
-
-        app.handle_key_event(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
-        assert_eq!(app.kanban_column_tasks(KanbanColumn::Todo).len(), 0);
-        assert_eq!(app.kanban_column_tasks(KanbanColumn::Done).len(), 1);
-
-        // Navigate to Doing column
+        // Quick add in Doing column
         app.handle_key_event(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE));
         assert_eq!(app.kanban_col, KanbanColumn::Doing);
-
-        // Quick add a new task from Doing column
         app.handle_key_event(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE));
-        assert!(matches!(app.mode, AppMode::NewTask(_)));
-        for c in "New Todo".chars() {
+        for c in "Doing Task".chars() {
             app.handle_key_event(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
         }
         app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
-        // Newly created task should be in Todo column, while focus stays in Doing
+        assert_eq!(app.mode, AppMode::Normal);
         assert_eq!(app.kanban_col, KanbanColumn::Doing);
+        let doing_tasks = app.kanban_column_tasks(KanbanColumn::Doing);
+        assert_eq!(doing_tasks.len(), 2);
+        assert_eq!(app.selected_task().unwrap().title, "Doing Task");
+        assert_eq!(app.selected_task().unwrap().status, TaskStatus::InProgress);
+    }
+
+    #[test]
+    fn test_kanban_task_state_transitions() {
+        let mut app = create_test_app();
+        app.switch_view(ViewList::Kanban);
+        assert_eq!(app.kanban_col, KanbanColumn::Todo);
+        let task = app.selected_task().unwrap();
+        assert_eq!(task.title, "First Task");
+        assert_eq!(task.status, TaskStatus::Todo);
+
+        // Move right with 'L': Todo -> InProgress (Doing)
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('L'), KeyModifiers::SHIFT));
+        assert_eq!(app.kanban_col, KanbanColumn::Doing);
+        assert_eq!(app.selected_task().unwrap().status, TaskStatus::InProgress);
+
+        // Move right with 'L': InProgress -> Done
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('L'), KeyModifiers::SHIFT));
+        assert_eq!(app.kanban_col, KanbanColumn::Done);
+        assert_eq!(app.selected_task().unwrap().status, TaskStatus::Done);
+
+        // Move right again when already Done -> stays Done
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('L'), KeyModifiers::SHIFT));
+        assert_eq!(app.kanban_col, KanbanColumn::Done);
+        assert_eq!(app.selected_task().unwrap().status, TaskStatus::Done);
+
+        // Move left with 'H': Done -> InProgress (Doing)
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('H'), KeyModifiers::SHIFT));
+        assert_eq!(app.kanban_col, KanbanColumn::Doing);
+        assert_eq!(app.selected_task().unwrap().status, TaskStatus::InProgress);
+
+        // Move left with 'H': InProgress -> Todo
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('H'), KeyModifiers::SHIFT));
+        assert_eq!(app.kanban_col, KanbanColumn::Todo);
+        assert_eq!(app.selected_task().unwrap().status, TaskStatus::Todo);
+
+        // Toggle complete with Space: Todo -> Done
+        app.handle_key_event(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+        assert_eq!(app.kanban_col, KanbanColumn::Done);
+        assert_eq!(app.selected_task().unwrap().status, TaskStatus::Done);
+
+        // Toggle complete again with Space: Done -> Todo
+        app.handle_key_event(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+        assert_eq!(app.kanban_col, KanbanColumn::Todo);
+        assert_eq!(app.selected_task().unwrap().status, TaskStatus::Todo);
+
+        // Set in progress with 'i': Todo -> Doing
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('i'), KeyModifiers::NONE));
+        assert_eq!(app.kanban_col, KanbanColumn::Doing);
+        assert_eq!(app.selected_task().unwrap().status, TaskStatus::InProgress);
+    }
+
+    #[test]
+    fn test_archive_task_state_transition_restore() {
+        let mut app = create_test_app();
+        // Mark task 1 as Done
+        app.handle_key_event(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+        assert_eq!(app.current_tasks()[0].status, TaskStatus::Done);
+
+        // In DB, simulate task completed_at 2 days ago (archive_after_days = 1)
+        let two_days_ago = (Local::now() - chrono::Duration::days(2)).to_rfc3339();
+        app.db
+            .conn()
+            .execute(
+                "UPDATE tasks SET completed_at = ?1 WHERE id = 1",
+                rusqlite::params![two_days_ago],
+            )
+            .unwrap();
+
+        // Switch to Archive view
+        app.switch_view(ViewList::Archive);
+        let archive_tasks = app.current_tasks();
+        assert_eq!(archive_tasks.len(), 1);
+        assert_eq!(archive_tasks[0].id, 1);
+
+        // In Archive view, pressing Space should toggle to Todo and restore to Active/Kanban!
+        app.handle_key_event(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+
+        // Archive view should now be empty
+        assert_eq!(app.current_tasks().len(), 0);
+
+        // Switch to Active view -> task 1 is back in Active!
+        app.switch_view(ViewList::Active);
+        let active_tasks = app.current_tasks();
+        assert_eq!(active_tasks.len(), 2);
+        assert_eq!(active_tasks[0].id, 1);
+        assert_eq!(active_tasks[0].status, TaskStatus::Todo);
+
+        // Also check Kanban view -> task 1 is in Todo column!
+        app.switch_view(ViewList::Kanban);
         let todo_tasks = app.kanban_column_tasks(KanbanColumn::Todo);
-        assert_eq!(todo_tasks.len(), 1);
-        assert_eq!(todo_tasks[0].title, "New Todo");
+        assert!(todo_tasks.iter().any(|t| t.id == 1));
     }
 
     #[test]
     fn test_kanban_delete_modal() {
         let mut app = create_test_app();
-        app.handle_key_event(KeyEvent::new(KeyCode::Char('K'), KeyModifiers::NONE));
+        app.switch_view(ViewList::Kanban);
         assert_eq!(app.current_tasks().len(), 2);
 
         // Delete from Kanban mode

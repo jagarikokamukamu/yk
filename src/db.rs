@@ -44,6 +44,11 @@ impl Db {
     }
 
     #[allow(dead_code)]
+    pub fn conn(&self) -> &Connection {
+        &self.conn
+    }
+
+    #[allow(dead_code)]
     pub fn open_in_memory() -> Result<Self> {
         let conn = Connection::open_in_memory()?;
         let db = Db { conn };
