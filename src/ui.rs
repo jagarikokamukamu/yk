@@ -72,10 +72,7 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
                 Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD),
             ));
         } else {
-            spans.push(Span::styled(
-                *label,
-                Style::default().fg(COLOR_TEXT_MUTED),
-            ));
+            spans.push(Span::styled(*label, Style::default().fg(COLOR_TEXT_MUTED)));
         }
     }
 
@@ -1422,8 +1419,14 @@ fn draw_help_modal(f: &mut Frame) {
             "  L / >",
             "ステータス後退 (右列へ移動: Todo → Doing → Done)",
         ),
-        ("  Space", "完了トグル (Todo/Doing ↔ Done, 移動先へフォーカス追従)"),
-        ("  i / I", "進行中に設定 (排他 / 並行, Doing列へフォーカス追従)"),
+        (
+            "  Space",
+            "完了トグル (Todo/Doing ↔ Done, 移動先へフォーカス追従)",
+        ),
+        (
+            "  i / I",
+            "進行中に設定 (排他 / 並行, Doing列へフォーカス追従)",
+        ),
         ("  a", "新規タスク追加 (TODO列へ追加)"),
         ("  e / Enter", "詳細編集モーダル"),
         ("  v", "詳細閲覧モーダル"),

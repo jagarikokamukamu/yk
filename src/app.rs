@@ -498,9 +498,7 @@ impl App {
 
     fn handle_normal_key(&mut self, key: KeyEvent) {
         // Tab / BackTab navigation through Active -> Kanban -> Archive -> Routine
-        if key.code == KeyCode::BackTab
-            || (key.modifiers == KeyModifiers::SHIFT && key.code == KeyCode::BackTab)
-        {
+        if key.code == KeyCode::BackTab {
             self.switch_view(self.view_list.prev());
             return;
         }
@@ -1267,9 +1265,18 @@ mod tests {
         assert_eq!(KanbanColumn::Doing.to_status(), TaskStatus::InProgress);
         assert_eq!(KanbanColumn::Done.to_status(), TaskStatus::Done);
 
-        assert_eq!(KanbanColumn::from_status(TaskStatus::Todo), KanbanColumn::Todo);
-        assert_eq!(KanbanColumn::from_status(TaskStatus::InProgress), KanbanColumn::Doing);
-        assert_eq!(KanbanColumn::from_status(TaskStatus::Done), KanbanColumn::Done);
+        assert_eq!(
+            KanbanColumn::from_status(TaskStatus::Todo),
+            KanbanColumn::Todo
+        );
+        assert_eq!(
+            KanbanColumn::from_status(TaskStatus::InProgress),
+            KanbanColumn::Doing
+        );
+        assert_eq!(
+            KanbanColumn::from_status(TaskStatus::Done),
+            KanbanColumn::Done
+        );
     }
 
     #[test]
