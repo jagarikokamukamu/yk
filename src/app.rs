@@ -534,7 +534,8 @@ impl App {
                 self.should_quit = true;
                 return;
             }
-            (KeyModifiers::NONE, KeyCode::Char('?')) => {
+            (KeyModifiers::SHIFT, KeyCode::Char('?'))
+            | (KeyModifiers::NONE, KeyCode::Char('?')) => {
                 self.mode = AppMode::Help;
                 return;
             }
@@ -1657,5 +1658,27 @@ mod tests {
         assert_eq!(app.mode, AppMode::Normal);
         assert_eq!(app.current_tasks().len(), 1);
         assert_eq!(app.kanban_column_tasks(KanbanColumn::Todo).len(), 0);
+    }
+
+    #[test]
+    fn test_help_modal_key() {
+        let mut app = create_test_app();
+        assert_eq!(app.mode, AppMode::Normal);
+
+        // Open help with Shift + ?
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::SHIFT));
+        assert_eq!(app.mode, AppMode::Help);
+
+        // Close help with ?
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE));
+        assert_eq!(app.mode, AppMode::Normal);
+
+        // Open help with ? without modifiers
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE));
+        assert_eq!(app.mode, AppMode::Help);
+
+        // Close help with Esc
+        app.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert_eq!(app.mode, AppMode::Normal);
     }
 }
