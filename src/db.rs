@@ -51,6 +51,11 @@ impl Db {
         Ok(db)
     }
 
+    #[allow(dead_code)]
+    pub fn conn(&self) -> &Connection {
+        &self.conn
+    }
+
     fn init(&self) -> Result<()> {
         self.conn.execute(
             "CREATE TABLE IF NOT EXISTS tasks (
@@ -357,6 +362,19 @@ impl Db {
         } else {
             Ok(None)
         }
+    }
+
+    pub fn update_task_status(&self, id: i64, status: TaskStatus) -> Result<()> {
+        let now = Local::now().to_rfc3339();
+        let completed_at = match status {
+            TaskStatus::Done => Some(now.clone()),
+            _ => None,
+        };
+        self.conn.execute(
+            "UPDATE tasks SET status = ?1, completed_at = ?2, updated_at = ?3 WHERE id = ?4",
+            params![status.as_str(), completed_at, now, id],
+        )?;
+        Ok(())
     }
 
     pub fn set_parallel_in_progress(&self, id: i64) -> Result<()> {

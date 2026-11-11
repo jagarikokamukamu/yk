@@ -14,7 +14,6 @@ use crate::app::{
     App, AppMode, EditField, EditRoutineField, EditRoutineState, EditState, KanbanColumn, ViewList,
     ViewRoutineState, ViewTaskState,
 };
-use crate::config::ViewStyle;
 use crate::model::{due_weekday_label, Priority, Routine, RoutineFrequency, Task, TaskStatus};
 use crate::theme::*;
 
@@ -46,67 +45,58 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 }
 
 fn draw_header(f: &mut Frame, app: &App, area: Rect) {
-    let mode_str = match app.view_list {
-        ViewList::Active => {
-            if app.view_style == ViewStyle::Kanban {
-                " ACTIVE (KANBAN) "
-            } else {
-                " ACTIVE (LIST) "
-            }
-        }
-        ViewList::Archive => " ARCHIVE ",
-        ViewList::Routine => " ROUTINE ",
-    };
-    let mode_style = match app.view_list {
-        ViewList::Active => Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD),
-        ViewList::Archive => Style::default()
-            .fg(COLOR_SLATE_PURPLE)
-            .add_modifier(Modifier::BOLD),
-        ViewList::Routine => Style::default()
-            .fg(COLOR_GOLD_YELLOW)
-            .add_modifier(Modifier::BOLD),
-    };
+    let views = [
+        (ViewList::Active, "1:ACTIVE"),
+        (ViewList::Kanban, "2:KANBAN"),
+        (ViewList::Archive, "3:ARCHIVE"),
+        (ViewList::Routine, "4:ROUTINE"),
+    ];
 
-    let count_info = match app.view_list {
-        ViewList::Routine => format!(" ({} routines)", app.current_routines().len()),
-        _ => format!(" ({} tasks)", app.current_tasks().len()),
-    };
-
-    let header_line = Line::from(vec![
+    let mut spans = vec![
         Span::styled(
             " yk ",
             Style::default()
                 .fg(COLOR_GOLD_YELLOW)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("- yarukoto  ", Style::default().fg(COLOR_TEXT_MUTED)),
-        Span::styled("[", Style::default().fg(COLOR_BORDER)),
-        Span::styled(mode_str, mode_style),
-        Span::styled("]", Style::default().fg(COLOR_BORDER)),
-        Span::styled(count_info, Style::default().fg(COLOR_TEXT_MUTED)),
-    ]);
+        Span::styled("- yarukoto   ", Style::default().fg(COLOR_TEXT_MUTED)),
+    ];
+
+    for (i, (view, label)) in views.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::raw("   "));
+        }
+        if app.view_list == *view {
+            spans.push(Span::styled(
+                *label,
+                Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD),
+            ));
+        } else {
+            spans.push(Span::styled(*label, Style::default().fg(COLOR_TEXT_MUTED)));
+        }
+    }
 
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(COLOR_BORDER));
 
-    let paragraph = Paragraph::new(header_line)
+    let paragraph = Paragraph::new(Line::from(spans))
         .block(block)
         .alignment(Alignment::Left);
     f.render_widget(paragraph, area);
 }
 
 fn draw_list(f: &mut Frame, app: &mut App, area: Rect) {
-    if app.view_list == ViewList::Routine {
-        draw_routine_list(f, app, area);
-    } else if app.view_list == ViewList::Active && app.view_style == ViewStyle::Kanban {
-        if area.width < 60 {
-            draw_narrow_warning(f, area);
-        } else {
-            draw_kanban_view(f, app, area);
+    match app.view_list {
+        ViewList::Routine => draw_routine_list(f, app, area),
+        ViewList::Kanban => {
+            if area.width < 60 {
+                draw_narrow_warning(f, area);
+            } else {
+                draw_kanban_view(f, app, area);
+            }
         }
-    } else {
-        draw_task_list(f, app, area);
+        ViewList::Active | ViewList::Archive => draw_task_list(f, app, area),
     }
 }
 
@@ -118,7 +108,7 @@ fn draw_task_list(f: &mut Frame, app: &mut App, area: Rect) {
         let empty_msg = match app.view_list {
             ViewList::Active => "タスクがありません。'a'キーで新規追加してください。",
             ViewList::Archive => "アーカイブされたタスクはありません。",
-            ViewList::Routine => "",
+            _ => "",
         };
         vec![ListItem::new(Line::from(vec![Span::styled(
             format!("  {}", empty_msg),
@@ -194,6 +184,7 @@ fn draw_task_list(f: &mut Frame, app: &mut App, area: Rect) {
         ViewList::Active => " Active Tasks ",
         ViewList::Archive => " Archived Tasks ",
         ViewList::Routine => " Routine Templates ",
+        ViewList::Kanban => " Kanban Tasks ",
     };
 
     let list_widget = List::new(items).block(
@@ -236,7 +227,7 @@ fn draw_narrow_warning(f: &mut Frame, area: Rect) {
         )),
         Line::from(""),
         Line::from(Span::styled(
-            "ウィンドウ幅を広げるか、[K] キーを押してリスト表示に切り替えてください。",
+            "ウィンドウ幅を広げるか、[1] キーを押してリスト表示(ACTIVE)に切り替えてください。",
             Style::default().fg(COLOR_TEXT_BODY),
         )),
     ];
@@ -495,9 +486,11 @@ fn draw_routine_list(f: &mut Frame, app: &mut App, area: Rect) {
 }
 
 fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
-    let help_line = if app.view_list == ViewList::Routine {
-        Line::from(vec![
-            Span::styled(" [a] ", Style::default().fg(COLOR_CYAN)),
+    let help_line = match app.view_list {
+        ViewList::Routine => Line::from(vec![
+            Span::styled(" [1-4/Tab] ", Style::default().fg(COLOR_CYAN)),
+            Span::styled("画面切替  ", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled("[a] ", Style::default().fg(COLOR_CYAN)),
             Span::styled("Add  ", Style::default().fg(COLOR_TEXT_MUTED)),
             Span::styled("[e] ", Style::default().fg(COLOR_CYAN)),
             Span::styled("Edit  ", Style::default().fg(COLOR_TEXT_MUTED)),
@@ -506,81 +499,76 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
             Span::styled("[d] ", Style::default().fg(COLOR_CYAN)),
             Span::styled("Delete  ", Style::default().fg(COLOR_TEXT_MUTED)),
             Span::styled("[p/Space] ", Style::default().fg(COLOR_CYAN)),
-            Span::styled("今すぐ発行  ", Style::default().fg(COLOR_TEXT_MUTED)),
-            Span::styled("[R/Tab] ", Style::default().fg(COLOR_CYAN)),
-            Span::styled("Activeへ  ", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled("発行  ", Style::default().fg(COLOR_TEXT_MUTED)),
             Span::styled("[?] ", Style::default().fg(COLOR_CYAN)),
             Span::styled("Help  ", Style::default().fg(COLOR_TEXT_MUTED)),
             Span::styled("[q] ", Style::default().fg(COLOR_CYAN)),
             Span::styled("Quit", Style::default().fg(COLOR_TEXT_MUTED)),
-        ])
-    } else if app.view_list == ViewList::Active && app.view_style == ViewStyle::Kanban {
-        Line::from(vec![
-            Span::styled(" [a] ", Style::default().fg(COLOR_CYAN)),
-            Span::styled("Add  ", Style::default().fg(COLOR_TEXT_MUTED)),
+        ]),
+        ViewList::Kanban => Line::from(vec![
+            Span::styled(" [1-4/Tab] ", Style::default().fg(COLOR_CYAN)),
+            Span::styled("画面切替  ", Style::default().fg(COLOR_TEXT_MUTED)),
             Span::styled("[h/l] ", Style::default().fg(COLOR_CYAN)),
-            Span::styled("Col  ", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled("列移動  ", Style::default().fg(COLOR_TEXT_MUTED)),
             Span::styled("[j/k] ", Style::default().fg(COLOR_CYAN)),
-            Span::styled("Item  ", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled("選択  ", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled("[H/L] ", Style::default().fg(COLOR_CYAN)),
+            Span::styled("ステータス変更  ", Style::default().fg(COLOR_TEXT_MUTED)),
             Span::styled("[Space] ", Style::default().fg(COLOR_CYAN)),
             Span::styled("Done  ", Style::default().fg(COLOR_TEXT_MUTED)),
             Span::styled("[i/I] ", Style::default().fg(COLOR_CYAN)),
-            Span::styled("InProg  ", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled("進行中  ", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled("[a] ", Style::default().fg(COLOR_CYAN)),
+            Span::styled("Add  ", Style::default().fg(COLOR_TEXT_MUTED)),
             Span::styled("[e] ", Style::default().fg(COLOR_CYAN)),
             Span::styled("Edit  ", Style::default().fg(COLOR_TEXT_MUTED)),
             Span::styled("[v] ", Style::default().fg(COLOR_CYAN)),
             Span::styled("View  ", Style::default().fg(COLOR_TEXT_MUTED)),
             Span::styled("[d] ", Style::default().fg(COLOR_CYAN)),
             Span::styled("Del  ", Style::default().fg(COLOR_TEXT_MUTED)),
-            Span::styled("[K] ", Style::default().fg(COLOR_CYAN)),
-            Span::styled("List  ", Style::default().fg(COLOR_TEXT_MUTED)),
-            Span::styled("[Tab] ", Style::default().fg(COLOR_CYAN)),
-            Span::styled("Tab  ", Style::default().fg(COLOR_TEXT_MUTED)),
             Span::styled("[?] ", Style::default().fg(COLOR_CYAN)),
             Span::styled("Help  ", Style::default().fg(COLOR_TEXT_MUTED)),
             Span::styled("[q] ", Style::default().fg(COLOR_CYAN)),
             Span::styled("Quit", Style::default().fg(COLOR_TEXT_MUTED)),
-        ])
-    } else {
-        let mut spans = vec![
-            Span::styled(" [a] ", Style::default().fg(COLOR_CYAN)),
+        ]),
+        ViewList::Archive => Line::from(vec![
+            Span::styled(" [1-4/Tab] ", Style::default().fg(COLOR_CYAN)),
+            Span::styled("画面切替  ", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled("[j/k] ", Style::default().fg(COLOR_CYAN)),
+            Span::styled("選択  ", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled("[Space] ", Style::default().fg(COLOR_CYAN)),
+            Span::styled("復元(Activeへ)  ", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled("[v] ", Style::default().fg(COLOR_CYAN)),
+            Span::styled("View  ", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled("[d] ", Style::default().fg(COLOR_CYAN)),
+            Span::styled("Del  ", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled("[?] ", Style::default().fg(COLOR_CYAN)),
+            Span::styled("Help  ", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled("[q] ", Style::default().fg(COLOR_CYAN)),
+            Span::styled("Quit", Style::default().fg(COLOR_TEXT_MUTED)),
+        ]),
+        ViewList::Active => Line::from(vec![
+            Span::styled(" [1-4/Tab] ", Style::default().fg(COLOR_CYAN)),
+            Span::styled("画面切替  ", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled("[j/k] ", Style::default().fg(COLOR_CYAN)),
+            Span::styled("選択  ", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled("[a] ", Style::default().fg(COLOR_CYAN)),
             Span::styled("Add  ", Style::default().fg(COLOR_TEXT_MUTED)),
             Span::styled("[Space] ", Style::default().fg(COLOR_CYAN)),
             Span::styled("Done  ", Style::default().fg(COLOR_TEXT_MUTED)),
             Span::styled("[i/I] ", Style::default().fg(COLOR_CYAN)),
-            Span::styled("InProg  ", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled("進行中  ", Style::default().fg(COLOR_TEXT_MUTED)),
             Span::styled("[e] ", Style::default().fg(COLOR_CYAN)),
             Span::styled("Edit  ", Style::default().fg(COLOR_TEXT_MUTED)),
             Span::styled("[v] ", Style::default().fg(COLOR_CYAN)),
             Span::styled("View  ", Style::default().fg(COLOR_TEXT_MUTED)),
             Span::styled("[d] ", Style::default().fg(COLOR_CYAN)),
             Span::styled("Del  ", Style::default().fg(COLOR_TEXT_MUTED)),
-        ];
-        if app.view_list == ViewList::Active {
-            spans.push(Span::styled("[K] ", Style::default().fg(COLOR_CYAN)));
-            spans.push(Span::styled(
-                "Kanban  ",
-                Style::default().fg(COLOR_TEXT_MUTED),
-            ));
-        }
-        spans.extend(vec![
-            Span::styled("[A] ", Style::default().fg(COLOR_CYAN)),
-            Span::styled(
-                if app.view_list == ViewList::Active {
-                    "Archive  "
-                } else {
-                    "Active  "
-                },
-                Style::default().fg(COLOR_TEXT_MUTED),
-            ),
-            Span::styled("[R] ", Style::default().fg(COLOR_CYAN)),
-            Span::styled("Routine  ", Style::default().fg(COLOR_TEXT_MUTED)),
             Span::styled("[?] ", Style::default().fg(COLOR_CYAN)),
             Span::styled("Help  ", Style::default().fg(COLOR_TEXT_MUTED)),
             Span::styled("[q] ", Style::default().fg(COLOR_CYAN)),
             Span::styled("Quit", Style::default().fg(COLOR_TEXT_MUTED)),
-        ]);
-        Line::from(spans)
+        ]),
     };
 
     let block = Block::default()
@@ -1395,7 +1383,19 @@ fn draw_help_modal(f: &mut Frame) {
     f.render_widget(block, area);
 
     let shortcuts = vec![
-        ("メイン一覧 (Active / Archive)", ""),
+        ("画面切り替え (ナビゲーション)", ""),
+        (
+            "  1 ~ 4",
+            "各画面へ直接切り替え (1:Active, 2:Kanban, 3:Archive, 4:Routine)",
+        ),
+        (
+            "  Tab / BackTab",
+            "4画面の双方向巡回 (Active ↔ Kanban ↔ Archive ↔ Routine)",
+        ),
+        ("  ?", "ヘルプモーダル表示"),
+        ("  q / Esc", "アプリケーション終了"),
+        ("", ""),
+        ("未完了タスク一覧 (Active)", ""),
         ("  j / ↓, k / ↑", "リストの循環移動"),
         ("  Space", "完了トグル (Todo ↔ Done, completed_at自動付与)"),
         (
@@ -1407,31 +1407,44 @@ fn draw_help_modal(f: &mut Frame) {
         ("  e / Enter", "詳細編集モーダル"),
         ("  v", "詳細閲覧モーダル"),
         ("  d", "削除確認モーダル (y/n)"),
-        ("  K", "看板モード ↔ リスト表示切り替え (Active時)"),
-        ("  Tab", "Active → Archive → Routine のビュー巡回"),
-        ("  A", "Active ↔ Archive 表示切り替え"),
-        ("  R", "Active ↔ Routine 表示切り替え"),
-        ("  ?", "ヘルプモーダル表示"),
-        ("  q / Esc", "アプリケーション終了"),
         ("", ""),
         ("看板モード (Kanban)", ""),
         ("  h / ←, l / →", "カラム間移動 (TODO ↔ DOING ↔ DONE)"),
         ("  j / ↓, k / ↑", "カラム内タスクの循環移動"),
-        ("  Space", "完了トグル (Todo ↔ Done)"),
-        ("  i / I", "進行中に設定 (排他 / 並行)"),
+        (
+            "  H / <",
+            "ステータス前進 (左列へ移動: Done → Doing → Todo)",
+        ),
+        (
+            "  L / >",
+            "ステータス後退 (右列へ移動: Todo → Doing → Done)",
+        ),
+        (
+            "  Space",
+            "完了トグル (Todo/Doing ↔ Done, 移動先へフォーカス追従)",
+        ),
+        (
+            "  i / I",
+            "進行中に設定 (排他 / 並行, Doing列へフォーカス追従)",
+        ),
         ("  a", "新規タスク追加 (TODO列へ追加)"),
         ("  e / Enter", "詳細編集モーダル"),
         ("  v", "詳細閲覧モーダル"),
         ("  d", "削除確認モーダル (y/n)"),
-        ("  K", "リスト表示へ戻る"),
+        ("", ""),
+        ("アーカイブ画面 (Archive)", ""),
+        ("  j / ↓, k / ↑", "リストの循環移動"),
+        ("  Space", "未完了への復元 (Todoに戻しActive/Kanbanへ復帰)"),
+        ("  v", "詳細閲覧モーダル"),
+        ("  d", "削除確認モーダル (y/n)"),
         ("", ""),
         ("定期タスク画面 (Routine)", ""),
+        ("  j / ↓, k / ↑", "リストの循環移動"),
         ("  a", "新規定期タスク登録モーダル"),
         ("  e / Enter", "定期タスク編集モーダル"),
         ("  d", "定期タスク削除確認モーダル (y/n)"),
         ("  v", "定期タスク詳細閲覧"),
         ("  p / Space", "今すぐ実体タスクをActiveに発行"),
-        ("  R / Esc", "Active画面へ戻る"),
         ("", ""),
         ("編集モーダル", ""),
         ("  Tab / Shift+Tab", "項目間移動 (次 / 前)"),
