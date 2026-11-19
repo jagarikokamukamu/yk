@@ -1375,12 +1375,12 @@ fn draw_help_modal(f: &mut Frame) {
         ("  h / ←, l / →", "カラム間移動 (TODO ↔ DOING ↔ DONE)"),
         ("  j / ↓, k / ↑", "カラム内タスクの循環移動"),
         (
-            "  H / <",
-            "ステータス前進 (左列へ移動: Done → Doing → Todo)",
+            "  H / Shift+←",
+            "ステータス変更 (左列へ移動: Done → Doing → Todo)",
         ),
         (
-            "  L / >",
-            "ステータス後退 (右列へ移動: Todo → Doing → Done)",
+            "  L / Shift+→",
+            "ステータス変更 (右列へ移動: Todo → Doing → Done)",
         ),
         (
             "  Space",

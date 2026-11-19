@@ -559,14 +559,12 @@ impl App {
                 }
                 (KeyModifiers::SHIFT, KeyCode::Char('H'))
                 | (KeyModifiers::NONE, KeyCode::Char('H'))
-                | (KeyModifiers::SHIFT, KeyCode::Char('<'))
-                | (KeyModifiers::NONE, KeyCode::Char('<')) => {
+                | (KeyModifiers::SHIFT, KeyCode::Left) => {
                     self.kanban_move_status_left();
                 }
                 (KeyModifiers::SHIFT, KeyCode::Char('L'))
                 | (KeyModifiers::NONE, KeyCode::Char('L'))
-                | (KeyModifiers::SHIFT, KeyCode::Char('>'))
-                | (KeyModifiers::NONE, KeyCode::Char('>')) => {
+                | (KeyModifiers::SHIFT, KeyCode::Right) => {
                     self.kanban_move_status_right();
                 }
                 (KeyModifiers::NONE, KeyCode::Char(' ')) => {
@@ -1509,10 +1507,15 @@ mod tests {
         assert_eq!(app.selected_task().unwrap().title, "First Task");
         assert_eq!(app.selected_task().unwrap().status, TaskStatus::InProgress);
 
-        // Right shift '>' -> moves from InProgress to Done and cursor follows
-        app.handle_key_event(KeyEvent::new(KeyCode::Char('>'), KeyModifiers::NONE));
+        // Shift+Right -> moves from InProgress to Done and cursor follows
+        app.handle_key_event(KeyEvent::new(KeyCode::Right, KeyModifiers::SHIFT));
         assert_eq!(app.kanban_col, KanbanColumn::Done);
         assert_eq!(app.selected_task().unwrap().title, "First Task");
+        assert_eq!(app.selected_task().unwrap().status, TaskStatus::Done);
+
+        // '<' should no longer change status
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('<'), KeyModifiers::SHIFT));
+        assert_eq!(app.kanban_col, KanbanColumn::Done);
         assert_eq!(app.selected_task().unwrap().status, TaskStatus::Done);
 
         // Left shift 'H' -> moves from Done to InProgress (Doing) and cursor follows
@@ -1521,8 +1524,13 @@ mod tests {
         assert_eq!(app.selected_task().unwrap().title, "First Task");
         assert_eq!(app.selected_task().unwrap().status, TaskStatus::InProgress);
 
-        // Left shift '<' -> moves from InProgress to Todo and cursor follows
-        app.handle_key_event(KeyEvent::new(KeyCode::Char('<'), KeyModifiers::NONE));
+        // '>' should no longer change status
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('>'), KeyModifiers::SHIFT));
+        assert_eq!(app.kanban_col, KanbanColumn::Doing);
+        assert_eq!(app.selected_task().unwrap().status, TaskStatus::InProgress);
+
+        // Shift+Left -> moves from InProgress to Todo and cursor follows
+        app.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::SHIFT));
         assert_eq!(app.kanban_col, KanbanColumn::Todo);
         assert_eq!(app.selected_task().unwrap().title, "First Task");
         assert_eq!(app.selected_task().unwrap().status, TaskStatus::Todo);
