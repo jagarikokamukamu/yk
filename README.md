@@ -87,6 +87,8 @@ yk routine generate 1                                 # 特定IDの定期タス�
 ### 未完了タスク一覧画面 (1: List)
 - `j` / `↓`: 下へ移動（末尾からは先頭へ循環）
 - `k` / `↑`: 上へ移動（先頭からは末尾へ循環）
+- `H` / `Shift+←`: ステータス変更（`Done` → `Doing` → `Todo`、カーソル追従）
+- `L` / `Shift+→`: ステータス変更（`Todo` → `Doing` → `Done`、カーソル追従）
 - `Space`: 完了トグル（Todo ↔ Done、completed_at を自動付与/解除）
 - `i`: 排他進行中（他の InProgress タスクを Todo に戻し、選択タスクのみ InProgress に設定）
 - `I`: 並行進行中（他のタスクを変更せず、選択タスクを InProgress に設定）

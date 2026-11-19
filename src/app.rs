@@ -329,8 +329,8 @@ impl App {
         self.clamp_selection();
     }
 
-    pub fn kanban_move_status_left(&mut self) {
-        if self.view_list != ViewList::Kanban {
+    pub fn move_status_left(&mut self) {
+        if !matches!(self.view_list, ViewList::List | ViewList::Kanban) {
             return;
         }
         let Some(task) = self.selected_task() else {
@@ -342,11 +342,23 @@ impl App {
             TaskStatus::Todo => return,
         };
         let _ = self.db.update_task_status(task.id, target_status);
-        self.kanban_focus_task(task.id, KanbanColumn::from_status(target_status));
+        match self.view_list {
+            ViewList::Kanban => {
+                self.kanban_focus_task(task.id, KanbanColumn::from_status(target_status));
+            }
+            ViewList::List => {
+                let tasks = self.current_tasks();
+                if let Some(pos) = tasks.iter().position(|t| t.id == task.id) {
+                    self.selected_index = pos;
+                }
+                self.clamp_selection();
+            }
+            _ => {}
+        }
     }
 
-    pub fn kanban_move_status_right(&mut self) {
-        if self.view_list != ViewList::Kanban {
+    pub fn move_status_right(&mut self) {
+        if !matches!(self.view_list, ViewList::List | ViewList::Kanban) {
             return;
         }
         let Some(task) = self.selected_task() else {
@@ -358,7 +370,19 @@ impl App {
             TaskStatus::Done => return,
         };
         let _ = self.db.update_task_status(task.id, target_status);
-        self.kanban_focus_task(task.id, KanbanColumn::from_status(target_status));
+        match self.view_list {
+            ViewList::Kanban => {
+                self.kanban_focus_task(task.id, KanbanColumn::from_status(target_status));
+            }
+            ViewList::List => {
+                let tasks = self.current_tasks();
+                if let Some(pos) = tasks.iter().position(|t| t.id == task.id) {
+                    self.selected_index = pos;
+                }
+                self.clamp_selection();
+            }
+            _ => {}
+        }
     }
 
     pub fn kanban_next_col(&mut self) {
@@ -560,12 +584,12 @@ impl App {
                 (KeyModifiers::SHIFT, KeyCode::Char('H'))
                 | (KeyModifiers::NONE, KeyCode::Char('H'))
                 | (KeyModifiers::SHIFT, KeyCode::Left) => {
-                    self.kanban_move_status_left();
+                    self.move_status_left();
                 }
                 (KeyModifiers::SHIFT, KeyCode::Char('L'))
                 | (KeyModifiers::NONE, KeyCode::Char('L'))
                 | (KeyModifiers::SHIFT, KeyCode::Right) => {
-                    self.kanban_move_status_right();
+                    self.move_status_right();
                 }
                 (KeyModifiers::NONE, KeyCode::Char(' ')) => {
                     if let Some(task) = self.selected_task() {
@@ -691,6 +715,20 @@ impl App {
                 }
                 (KeyModifiers::NONE, KeyCode::Char('k')) | (KeyModifiers::NONE, KeyCode::Up) => {
                     self.move_up();
+                }
+                (KeyModifiers::SHIFT, KeyCode::Char('H'))
+                | (KeyModifiers::NONE, KeyCode::Char('H'))
+                | (KeyModifiers::SHIFT, KeyCode::Left)
+                    if self.view_list == ViewList::List =>
+                {
+                    self.move_status_left();
+                }
+                (KeyModifiers::SHIFT, KeyCode::Char('L'))
+                | (KeyModifiers::NONE, KeyCode::Char('L'))
+                | (KeyModifiers::SHIFT, KeyCode::Right)
+                    if self.view_list == ViewList::List =>
+                {
+                    self.move_status_right();
                 }
                 (KeyModifiers::NONE, KeyCode::Char(' ')) => {
                     if let Some(task) = self.selected_task() {
@@ -1688,5 +1726,43 @@ mod tests {
         // Close help with Esc
         app.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
         assert_eq!(app.mode, AppMode::Normal);
+    }
+
+    #[test]
+    fn test_list_task_status_keys() {
+        let mut app = create_test_app();
+        assert_eq!(app.view_list, ViewList::List);
+        assert_eq!(app.selected_task().unwrap().title, "First Task");
+        assert_eq!(app.selected_task().unwrap().status, TaskStatus::Todo);
+
+        // Left on Todo should stay Todo
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('H'), KeyModifiers::SHIFT));
+        assert_eq!(app.selected_task().unwrap().title, "First Task");
+        assert_eq!(app.selected_task().unwrap().status, TaskStatus::Todo);
+
+        // 'L' -> Todo to InProgress (focus follows task)
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('L'), KeyModifiers::SHIFT));
+        assert_eq!(app.selected_task().unwrap().title, "First Task");
+        assert_eq!(app.selected_task().unwrap().status, TaskStatus::InProgress);
+
+        // Shift+Right -> InProgress to Done (focus follows task)
+        app.handle_key_event(KeyEvent::new(KeyCode::Right, KeyModifiers::SHIFT));
+        assert_eq!(app.selected_task().unwrap().title, "First Task");
+        assert_eq!(app.selected_task().unwrap().status, TaskStatus::Done);
+
+        // Right on Done should stay Done
+        app.handle_key_event(KeyEvent::new(KeyCode::Right, KeyModifiers::SHIFT));
+        assert_eq!(app.selected_task().unwrap().title, "First Task");
+        assert_eq!(app.selected_task().unwrap().status, TaskStatus::Done);
+
+        // 'H' -> Done to InProgress (focus follows task)
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('H'), KeyModifiers::NONE));
+        assert_eq!(app.selected_task().unwrap().title, "First Task");
+        assert_eq!(app.selected_task().unwrap().status, TaskStatus::InProgress);
+
+        // Shift+Left -> InProgress to Todo (focus follows task)
+        app.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::SHIFT));
+        assert_eq!(app.selected_task().unwrap().title, "First Task");
+        assert_eq!(app.selected_task().unwrap().status, TaskStatus::Todo);
     }
 }

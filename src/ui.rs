@@ -551,6 +551,8 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
             Span::styled("画面切替  ", Style::default().fg(COLOR_TEXT_MUTED)),
             Span::styled("[j/k] ", Style::default().fg(COLOR_CYAN)),
             Span::styled("選択  ", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled("[H/L] ", Style::default().fg(COLOR_CYAN)),
+            Span::styled("ステータス変更  ", Style::default().fg(COLOR_TEXT_MUTED)),
             Span::styled("[a] ", Style::default().fg(COLOR_CYAN)),
             Span::styled("Add  ", Style::default().fg(COLOR_TEXT_MUTED)),
             Span::styled("[Space] ", Style::default().fg(COLOR_CYAN)),
@@ -1360,6 +1362,8 @@ fn draw_help_modal(f: &mut Frame) {
         ("", ""),
         ("未完了タスク一覧 (List)", ""),
         ("  j / ↓, k / ↑", "リストの循環移動"),
+        ("  H / Shift+←", "ステータス変更 (Done → Doing → Todo)"),
+        ("  L / Shift+→", "ステータス変更 (Todo → Doing → Done)"),
         ("  Space", "完了トグル (Todo ↔ Done, completed_at自動付与)"),
         (
             "  i",
