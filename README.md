@@ -17,7 +17,7 @@ Rust製のTUI Todo管理ツールです。
 # 完了タスクをアーカイブへ移動する日数（デフォルト: 1）
 archive_after_days = 1
 
-# 起動時の初期画面: "list" (Active) または "kanban" (Kanban)（デフォルト: "list"）
+# 起動時の初期画面: "list" (List) または "kanban" (Kanban)（デフォルト: "list"）
 default_view = "list"
 
 # 新規作成したタスクを自動で選択状態にするか（デフォルト: false）
@@ -78,13 +78,13 @@ yk routine generate 1                                 # 特定IDの定期タス�
 ## TUIキー操作一覧
 
 ### 画面切り替え（ナビゲーション）
-- `1` 〜 `4`: 各画面へ直接移動（`1: ACTIVE`, `2: KANBAN`, `3: ARCHIVE`, `4: ROUTINE`）
-- `Tab` / `BackTab`: 4画面の巡回切り替え（`Active ↔ Kanban ↔ Archive ↔ Routine`）
-- `Active` ↔ `Kanban` 間の画面切り替え時、選択中のタスク位置（列・行）が自動的に引き継がれます。
+- `1` 〜 `4`: 各画面へ直接移動（`1: LIST`, `2: KANBAN`, `3: ARCHIVE`, `4: ROUTINE`）
+- `Tab` / `BackTab`: 4画面の巡回切り替え（`List ↔ Kanban ↔ Archive ↔ Routine`）
+- `List` ↔ `Kanban` 間の画面切り替え時、選択中のタスク位置（列・行）が自動的に引き継がれます。
 - `?`: ヘルプモーダルを開く
 - `q` / `Esc`: アプリケーションを終了
 
-### 未完了タスク一覧画面 (1: Active)
+### 未完了タスク一覧画面 (1: List)
 - `j` / `↓`: 下へ移動（末尾からは先頭へ循環）
 - `k` / `↑`: 上へ移動（先頭からは末尾へ循環）
 - `Space`: 完了トグル（Todo ↔ Done、completed_at を自動付与/解除）
@@ -115,7 +115,7 @@ TODO / DOING / DONE の3カラムで未完了タスクを表示します。
 完了から一定日数（設定値: `archive_after_days`）経過したタスクの一覧です。
 - `j` / `↓`: 下へ移動（末尾からは先頭へ循環）
 - `k` / `↑`: 上へ移動（先頭からは末尾へ循環）
-- `Space`: 未完了への復元（ステータスを Todo に戻し、即座に Active / Kanban 画面側へ復帰）
+- `Space`: 未完了への復元（ステータスを Todo に戻し、即座に List / Kanban 画面側へ復帰）
 - `v`: 詳細閲覧モーダルを開く
 - `d`: 削除確認モーダルを開く
 

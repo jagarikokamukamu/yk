@@ -45,7 +45,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
 fn draw_header(f: &mut Frame, app: &App, area: Rect) {
     let views = [
-        (ViewList::Active, "1:ACTIVE"),
+        (ViewList::List, "1:LIST"),
         (ViewList::Kanban, "2:KANBAN"),
         (ViewList::Archive, "3:ARCHIVE"),
         (ViewList::Routine, "4:ROUTINE"),
@@ -95,7 +95,7 @@ fn draw_list(f: &mut Frame, app: &mut App, area: Rect) {
                 draw_kanban_view(f, app, area);
             }
         }
-        ViewList::Active | ViewList::Archive => draw_task_list(f, app, area),
+        ViewList::List | ViewList::Archive => draw_task_list(f, app, area),
     }
 }
 
@@ -105,7 +105,7 @@ fn draw_task_list(f: &mut Frame, app: &mut App, area: Rect) {
 
     let items: Vec<ListItem> = if tasks.is_empty() {
         let empty_msg = match app.view_list {
-            ViewList::Active => "タスクがありません。'a'キーで新規追加してください。",
+            ViewList::List => "タスクがありません。'a'キーで新規追加してください。",
             ViewList::Archive => "アーカイブされたタスクはありません。",
             _ => "",
         };
@@ -180,7 +180,7 @@ fn draw_task_list(f: &mut Frame, app: &mut App, area: Rect) {
     };
 
     let title_text = match app.view_list {
-        ViewList::Active => " Active Tasks ",
+        ViewList::List => " List Tasks ",
         ViewList::Archive => " Archived Tasks ",
         ViewList::Routine => " Routine Templates ",
         ViewList::Kanban => " Kanban Tasks ",
@@ -226,7 +226,7 @@ fn draw_narrow_warning(f: &mut Frame, area: Rect) {
         )),
         Line::from(""),
         Line::from(Span::styled(
-            "ウィンドウ幅を広げるか、[1] キーを押してリスト表示(ACTIVE)に切り替えてください。",
+            "ウィンドウ幅を広げるか、[1] キーを押してリスト表示(LIST)に切り替えてください。",
             Style::default().fg(COLOR_TEXT_BODY),
         )),
     ];
@@ -536,7 +536,7 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
             Span::styled("[j/k] ", Style::default().fg(COLOR_CYAN)),
             Span::styled("選択  ", Style::default().fg(COLOR_TEXT_MUTED)),
             Span::styled("[Space] ", Style::default().fg(COLOR_CYAN)),
-            Span::styled("復元(Activeへ)  ", Style::default().fg(COLOR_TEXT_MUTED)),
+            Span::styled("復元(Listへ)  ", Style::default().fg(COLOR_TEXT_MUTED)),
             Span::styled("[v] ", Style::default().fg(COLOR_CYAN)),
             Span::styled("View  ", Style::default().fg(COLOR_TEXT_MUTED)),
             Span::styled("[d] ", Style::default().fg(COLOR_CYAN)),
@@ -546,7 +546,7 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
             Span::styled("[q] ", Style::default().fg(COLOR_CYAN)),
             Span::styled("Quit", Style::default().fg(COLOR_TEXT_MUTED)),
         ]),
-        ViewList::Active => Line::from(vec![
+        ViewList::List => Line::from(vec![
             Span::styled(" [1-4/Tab] ", Style::default().fg(COLOR_CYAN)),
             Span::styled("画面切替  ", Style::default().fg(COLOR_TEXT_MUTED)),
             Span::styled("[j/k] ", Style::default().fg(COLOR_CYAN)),
@@ -1349,16 +1349,16 @@ fn draw_help_modal(f: &mut Frame) {
         ("画面切り替え (ナビゲーション)", ""),
         (
             "  1 ~ 4",
-            "各画面へ直接切り替え (1:Active, 2:Kanban, 3:Archive, 4:Routine)",
+            "各画面へ直接切り替え (1:List, 2:Kanban, 3:Archive, 4:Routine)",
         ),
         (
             "  Tab / BackTab",
-            "4画面の双方向巡回 (Active ↔ Kanban ↔ Archive ↔ Routine)",
+            "4画面の双方向巡回 (List ↔ Kanban ↔ Archive ↔ Routine)",
         ),
         ("  ?", "ヘルプモーダル表示"),
         ("  q / Esc", "アプリケーション終了"),
         ("", ""),
-        ("未完了タスク一覧 (Active)", ""),
+        ("未完了タスク一覧 (List)", ""),
         ("  j / ↓, k / ↑", "リストの循環移動"),
         ("  Space", "完了トグル (Todo ↔ Done, completed_at自動付与)"),
         (
@@ -1397,7 +1397,7 @@ fn draw_help_modal(f: &mut Frame) {
         ("", ""),
         ("アーカイブ画面 (Archive)", ""),
         ("  j / ↓, k / ↑", "リストの循環移動"),
-        ("  Space", "未完了への復元 (Todoに戻しActive/Kanbanへ復帰)"),
+        ("  Space", "未完了への復元 (Todoに戻しList/Kanbanへ復帰)"),
         ("  v", "詳細閲覧モーダル"),
         ("  d", "削除確認モーダル (y/n)"),
         ("", ""),
@@ -1407,7 +1407,7 @@ fn draw_help_modal(f: &mut Frame) {
         ("  e / Enter", "定期タスク編集モーダル"),
         ("  d", "定期タスク削除確認モーダル (y/n)"),
         ("  v", "定期タスク詳細閲覧"),
-        ("  p / Space", "今すぐ実体タスクをActiveに発行"),
+        ("  p / Space", "今すぐ実体タスクをListに発行"),
         ("", ""),
         ("編集モーダル", ""),
         ("  Tab / Shift+Tab", "項目間移動 (次 / 前)"),

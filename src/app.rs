@@ -62,7 +62,7 @@ impl KanbanColumn {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ViewList {
     #[default]
-    Active,
+    List,
     Kanban,
     Archive,
     Routine,
@@ -71,17 +71,17 @@ pub enum ViewList {
 impl ViewList {
     pub fn next(&self) -> Self {
         match self {
-            ViewList::Active => ViewList::Kanban,
+            ViewList::List => ViewList::Kanban,
             ViewList::Kanban => ViewList::Archive,
             ViewList::Archive => ViewList::Routine,
-            ViewList::Routine => ViewList::Active,
+            ViewList::Routine => ViewList::List,
         }
     }
 
     pub fn prev(&self) -> Self {
         match self {
-            ViewList::Active => ViewList::Routine,
-            ViewList::Kanban => ViewList::Active,
+            ViewList::List => ViewList::Routine,
+            ViewList::Kanban => ViewList::List,
             ViewList::Archive => ViewList::Kanban,
             ViewList::Routine => ViewList::Archive,
         }
@@ -217,7 +217,7 @@ impl App {
         list_state.select(Some(0));
         let view_list = match config.default_view {
             ViewStyle::Kanban => ViewList::Kanban,
-            _ => ViewList::Active,
+            _ => ViewList::List,
         };
         Self {
             db,
@@ -238,7 +238,7 @@ impl App {
         all_tasks
             .into_iter()
             .filter(|t| match self.view_list {
-                ViewList::Active | ViewList::Kanban => {
+                ViewList::List | ViewList::Kanban => {
                     !t.is_archived(self.config.archive_after_days, now)
                 }
                 ViewList::Archive => t.is_archived(self.config.archive_after_days, now),
@@ -304,8 +304,8 @@ impl App {
         let prev = self.view_list;
 
         // Active <-> Kanban 間フォーカス同期
-        if (prev == ViewList::Active && target == ViewList::Kanban)
-            || (prev == ViewList::Kanban && target == ViewList::Active)
+        if (prev == ViewList::List && target == ViewList::Kanban)
+            || (prev == ViewList::Kanban && target == ViewList::List)
         {
             if let Some(task) = self.selected_task() {
                 let task_id = task.id;
@@ -509,7 +509,7 @@ impl App {
         if key.modifiers == KeyModifiers::NONE {
             match key.code {
                 KeyCode::Char('1') => {
-                    self.switch_view(ViewList::Active);
+                    self.switch_view(ViewList::List);
                     return;
                 }
                 KeyCode::Char('2') => {
@@ -687,7 +687,7 @@ impl App {
                 }
                 _ => {}
             },
-            ViewList::Active | ViewList::Archive => match (key.modifiers, key.code) {
+            ViewList::List | ViewList::Archive => match (key.modifiers, key.code) {
                 (KeyModifiers::NONE, KeyCode::Char('j')) | (KeyModifiers::NONE, KeyCode::Down) => {
                     self.move_down();
                 }
@@ -700,7 +700,7 @@ impl App {
                         self.clamp_selection();
                     }
                 }
-                (KeyModifiers::NONE, KeyCode::Char('i')) if self.view_list == ViewList::Active => {
+                (KeyModifiers::NONE, KeyCode::Char('i')) if self.view_list == ViewList::List => {
                     if let Some(task) = self.selected_task() {
                         let _ = self.db.set_exclusive_in_progress(task.id);
                         self.clamp_selection();
@@ -708,14 +708,14 @@ impl App {
                 }
                 (KeyModifiers::SHIFT, KeyCode::Char('I'))
                 | (KeyModifiers::NONE, KeyCode::Char('I'))
-                    if self.view_list == ViewList::Active =>
+                    if self.view_list == ViewList::List =>
                 {
                     if let Some(task) = self.selected_task() {
                         let _ = self.db.set_parallel_in_progress(task.id);
                         self.clamp_selection();
                     }
                 }
-                (KeyModifiers::NONE, KeyCode::Char('a')) if self.view_list == ViewList::Active => {
+                (KeyModifiers::NONE, KeyCode::Char('a')) if self.view_list == ViewList::List => {
                     self.mode = AppMode::EditTask(EditState {
                         target_task_id: None,
                         title: String::new(),
@@ -727,7 +727,7 @@ impl App {
                     });
                 }
                 (KeyModifiers::NONE, KeyCode::Char('e')) | (KeyModifiers::NONE, KeyCode::Enter)
-                    if self.view_list == ViewList::Active =>
+                    if self.view_list == ViewList::List =>
                 {
                     if let Some(task) = self.selected_task() {
                         let due_date_str = task
@@ -1425,7 +1425,7 @@ mod tests {
 
         // Switch back to Active view with '1'
         app.handle_key_event(KeyEvent::new(KeyCode::Char('1'), KeyModifiers::NONE));
-        assert_eq!(app.view_list, ViewList::Active);
+        assert_eq!(app.view_list, ViewList::List);
         let tasks = app.current_tasks();
         assert_eq!(tasks.len(), 3);
         assert_eq!(tasks[2].title, "Weekly Review");
@@ -1434,7 +1434,7 @@ mod tests {
     #[test]
     fn test_four_views_navigation() {
         let mut app = create_test_app();
-        assert_eq!(app.view_list, ViewList::Active);
+        assert_eq!(app.view_list, ViewList::List);
 
         // Tab cycles Active -> Kanban -> Archive -> Routine -> Active
         app.handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
@@ -1444,7 +1444,7 @@ mod tests {
         app.handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
         assert_eq!(app.view_list, ViewList::Routine);
         app.handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
-        assert_eq!(app.view_list, ViewList::Active);
+        assert_eq!(app.view_list, ViewList::List);
 
         // BackTab cycles Active -> Routine -> Archive -> Kanban -> Active
         app.handle_key_event(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
@@ -1454,7 +1454,7 @@ mod tests {
         app.handle_key_event(KeyEvent::new(KeyCode::BackTab, KeyModifiers::NONE));
         assert_eq!(app.view_list, ViewList::Kanban);
         app.handle_key_event(KeyEvent::new(KeyCode::BackTab, KeyModifiers::NONE));
-        assert_eq!(app.view_list, ViewList::Active);
+        assert_eq!(app.view_list, ViewList::List);
 
         // Number keys 1 ~ 4
         app.handle_key_event(KeyEvent::new(KeyCode::Char('3'), KeyModifiers::NONE));
@@ -1464,13 +1464,13 @@ mod tests {
         app.handle_key_event(KeyEvent::new(KeyCode::Char('4'), KeyModifiers::NONE));
         assert_eq!(app.view_list, ViewList::Routine);
         app.handle_key_event(KeyEvent::new(KeyCode::Char('1'), KeyModifiers::NONE));
-        assert_eq!(app.view_list, ViewList::Active);
+        assert_eq!(app.view_list, ViewList::List);
     }
 
     #[test]
     fn test_view_switch_focus_transfer() {
         let mut app = create_test_app();
-        assert_eq!(app.view_list, ViewList::Active);
+        assert_eq!(app.view_list, ViewList::List);
 
         // Task 0 is Todo, Task 1 is InProgress
         app.move_down();
@@ -1490,7 +1490,7 @@ mod tests {
 
         // Switch back to Active with '1'
         app.handle_key_event(KeyEvent::new(KeyCode::Char('1'), KeyModifiers::NONE));
-        assert_eq!(app.view_list, ViewList::Active);
+        assert_eq!(app.view_list, ViewList::List);
         assert_eq!(app.selected_index, 0);
         assert_eq!(app.selected_task().unwrap().title, "First Task");
     }
@@ -1575,7 +1575,7 @@ mod tests {
 
         // Switch to Active view (with key '1') -> task should be there as Todo
         app.handle_key_event(KeyEvent::new(KeyCode::Char('1'), KeyModifiers::NONE));
-        assert_eq!(app.view_list, ViewList::Active);
+        assert_eq!(app.view_list, ViewList::List);
         let active_tasks = app.current_tasks();
         let restored = active_tasks.iter().find(|t| t.id == task_id).unwrap();
         assert_eq!(restored.status, TaskStatus::Todo);
